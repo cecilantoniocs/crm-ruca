@@ -1,0 +1,519 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "name": "Cecil",
+      "email": "admin@admin.com",
+      "password": "1234",
+      "role": "admin",
+      "isAdmin": true,
+      "permissions": {},
+      "clients": [
+        {
+          "id": "2"
+        },
+        {
+          "id": "3"
+        }
+      ],
+      "numberSales": 2,
+      "partnerTag": "",
+      "perms": {
+        "clients": {
+          "view": true,
+          "create": true,
+          "edit": true,
+          "delete": true
+        },
+        "orders": {
+          "view": true,
+          "create": true,
+          "edit": true,
+          "delete": true,
+          "markDelivered": true
+        },
+        "products": {
+          "view": true,
+          "create": true,
+          "edit": true,
+          "delete": true
+        },
+        "sales": {
+          "view": true,
+          "togglePaid": true,
+          "toggleInvoice": true
+        },
+        "users": {
+          "view": true,
+          "create": true,
+          "edit": true,
+          "delete": true
+        }
+      }
+    },
+    {
+      "id": 5,
+      "name": "Pedro",
+      "email": "pedro@gmail.com",
+      "password": "1234",
+      "company": "Intel",
+      "role": "client",
+      "sellerId": 2
+    },
+    {
+      "id": 6,
+      "name": "Juan",
+      "email": "juan@gmail.com",
+      "password": "1234",
+      "company": "Intel",
+      "role": "client",
+      "sellerId": 2
+    },
+    {
+      "name": "DAVIES",
+      "nombre_local": "PICA LOS 3 HERMANOS",
+      "dir1": "LOS CHAGUALES 789",
+      "zona": "SINDEMPART",
+      "ciudad": "COQUIMBO",
+      "telefono": "+56992032109",
+      "email": "davies@gmail.com",
+      "rut": "88566766-3",
+      "razon_social": "c&d",
+      "id": "7d63e09b-6ea3-4f5f-b013-471d9586e37d",
+      "role": "client",
+      "sellerId": 1
+    },
+    {
+      "name": "ALIDA",
+      "nombre_local": "SABORES DEL SUR",
+      "dir1": "PAN DE AZUCAR 55",
+      "zona": "PAN DE AZUCAR",
+      "ciudad": "COQUIMBO",
+      "telefono": "+56992032109",
+      "email": "alida@gmail.com",
+      "rut": "78456654-2",
+      "razon_social": "ALIDA SPA",
+      "id": "d451bcc6-8578-466d-994b-ca703de9d8f1",
+      "role": "client",
+      "sellerId": 1
+    },
+    {
+      "name": "JORGE",
+      "nombre_local": "ZOROBABEL",
+      "dir1": "LOS CLARINES 78",
+      "zona": "PUNTA MIRA",
+      "ciudad": "COQUIMBO",
+      "telefono": "+56992032109",
+      "email": "jorge@gmail.com",
+      "rut": "12989678-3",
+      "razon_social": "JORGE LTDA",
+      "id": "2ab35c48-3d45-4be2-bccc-82989d8298a7",
+      "role": "client",
+      "sellerId": 1
+    },
+    {
+      "name": "IGNACIO",
+      "nombre_local": "OUTLET DE LAS CARNES",
+      "dir1": "GASPAR MARIN 345",
+      "zona": "LAS COMPAÑIAS",
+      "ciudad": "LA SERENA",
+      "telefono": "+56992032109",
+      "email": "ignacio@outlet.cl",
+      "rut": "",
+      "razon_social": "",
+      "id": "40c50ebc-6347-4e3a-89c2-2b109128c93c",
+      "role": "client",
+      "sellerId": 1
+    },
+    {
+      "name": "SANDRA FUENTES",
+      "nombre_local": "BOTILLERIA PARAISO",
+      "dir1": "SANTO DOMINGO 2556",
+      "zona": "LAS COMPAÑIAS",
+      "ciudad": "LA SERENA",
+      "telefono": "+56992032109",
+      "email": "sandra@gmail.com",
+      "rut": "78878345-3",
+      "razon_social": "SANDRA BOT SPA",
+      "id": "72287452-cd60-4476-a9b1-e50fbd5d6228",
+      "role": "client",
+      "sellerId": 1
+    },
+    {
+      "name": "JACQUE",
+      "nombre_local": "BOTILLERIA BODEGA DE JACQUE",
+      "dir1": "CIENFUEGOS 678",
+      "zona": "LA SERENA CENTRO",
+      "ciudad": "LA SERENA",
+      "telefono": "+56992032109",
+      "email": "jacque@gmail.com",
+      "rut": "",
+      "razon_social": "",
+      "id": "33cac238-a654-446f-9066-33d062dd3c37",
+      "role": "client",
+      "sellerId": 1
+    },
+    {
+      "name": "CLAUDIA",
+      "nombre_local": "BOTILLERIA ARANCIBIA",
+      "dir1": "ARGENTINA 7845",
+      "zona": "LAS COMPAÑIAS",
+      "ciudad": "LA SERENA",
+      "telefono": "+56992032109",
+      "email": "si@gmail.com",
+      "rut": "",
+      "razon_social": "",
+      "id": "4478ffbd-7e71-4709-b05a-55709cdc352e",
+      "role": "client",
+      "sellerId": 1
+    },
+    {
+      "name": "VERONICA",
+      "nombre_local": "LOCAL CAMILO HENRIQUEZ",
+      "dir1": "CAMILO HENRIQUEZ 788",
+      "zona": "PARTE ALTA",
+      "ciudad": "COQUIMBO",
+      "telefono": "+56992032109",
+      "email": "vero@gmail.com",
+      "rut": "",
+      "razon_social": "",
+      "id": "9b9370fc-6b2d-4b02-87d3-6c331154833e",
+      "role": "client",
+      "sellerId": 1
+    },
+    {
+      "name": "ISABEL",
+      "nombre_local": "BOTILLERIA ITALIA",
+      "dir1": "ITALIA 989",
+      "zona": "SAN JUAN",
+      "ciudad": "COQUIMBO",
+      "telefono": "+56992032109",
+      "email": "isxa@gmail.com",
+      "rut": "",
+      "razon_social": "",
+      "id": "72ef3366-f255-48c4-9bb1-9c904e4f2216",
+      "role": "client",
+      "sellerId": 1
+    },
+    {
+      "id": "87320369-f6b6-490a-b52d-01edf732d195",
+      "name": "Michell",
+      "email": "michell@michell.com",
+      "password": "1234",
+      "role": "repartidor",
+      "partnerTag": "Michell",
+      "perms": {
+        "clients": {
+          "view": true,
+          "create": true,
+          "edit": true,
+          "delete": false
+        },
+        "orders": {
+          "view": true,
+          "create": true,
+          "edit": true,
+          "delete": false,
+          "markDelivered": true
+        },
+        "products": {
+          "view": false,
+          "create": false,
+          "edit": false,
+          "delete": false
+        },
+        "sales": {
+          "view": true,
+          "togglePaid": false,
+          "toggleInvoice": false
+        },
+        "users": {
+          "view": false,
+          "create": false,
+          "edit": false,
+          "delete": false
+        }
+      }
+    },
+    {
+      "id": "436f8418-e204-42ad-be0a-78e0615a95b3",
+      "name": "Hugo",
+      "email": "carbonrucapellan@hotmail.com",
+      "password": "1234",
+      "role": "supervisor",
+      "partnerTag": "",
+      "perms": {
+        "clients": {
+          "view": true,
+          "create": true,
+          "edit": true,
+          "delete": false
+        },
+        "orders": {
+          "view": true,
+          "create": true,
+          "edit": true,
+          "delete": false,
+          "markDelivered": true
+        },
+        "products": {
+          "view": false,
+          "create": false,
+          "edit": false,
+          "delete": false
+        },
+        "sales": {
+          "view": true,
+          "togglePaid": true,
+          "toggleInvoice": true
+        },
+        "users": {
+          "view": false,
+          "create": false,
+          "edit": false,
+          "delete": false
+        }
+      }
+    },
+    {
+      "id": "f4ba4034-e561-4e2a-83e2-2deaee789923",
+      "name": "Marcia",
+      "email": "marciaceciliasoto@gmail.com",
+      "password": "1234",
+      "role": "supervisor",
+      "partnerTag": "",
+      "perms": {
+        "clients": {
+          "view": true,
+          "create": true,
+          "edit": true,
+          "delete": false
+        },
+        "orders": {
+          "view": true,
+          "create": true,
+          "edit": true,
+          "delete": false,
+          "markDelivered": true
+        },
+        "products": {
+          "view": false,
+          "create": false,
+          "edit": false,
+          "delete": false
+        },
+        "sales": {
+          "view": true,
+          "togglePaid": true,
+          "toggleInvoice": true
+        },
+        "users": {
+          "view": false,
+          "create": false,
+          "edit": false,
+          "delete": false
+        }
+      }
+    }
+  ],
+  "products": [
+    {
+      "name": "RUCAPELLAN CLASICO",
+      "category": "BOLSAS DE CARBON",
+      "sku": "C001",
+      "cost": 1600,
+      "weight": "2.5",
+      "imageUrl": "/uploads/1756863800207_ruca-clasico.png",
+      "id": "ctZ8mUx"
+    },
+    {
+      "name": "RUCAPELLAN MEZCLA",
+      "category": "BOLSAS DE CARBON",
+      "sku": "C002",
+      "cost": 1600,
+      "weight": "2.5",
+      "imageUrl": "/uploads/1756863818328_ruca-mezcla.png",
+      "id": "4neClys"
+    },
+    {
+      "name": "RUCAPELLAN MASTER",
+      "category": "BOLSAS DE CARBÓN",
+      "sku": "C003",
+      "cost": 1600,
+      "weight": "2.5",
+      "imageUrl": "/uploads/1756863845086_ruca-master.png",
+      "id": "V_z9V4s"
+    },
+    {
+      "name": "PERLA NEGRA",
+      "category": "BOLSAS DE CARBÓN",
+      "sku": "C004",
+      "cost": 2000,
+      "weight": "3",
+      "imageUrl": "/uploads/1756863871016_perla-negra.png",
+      "id": "vTZNnyR"
+    },
+    {
+      "name": "GENERICO QUEBRACHO",
+      "category": "BOLSAS DE CARBON",
+      "sku": "C005",
+      "cost": 1500,
+      "weight": "2.5",
+      "imageUrl": "/uploads/1756863893235_quebracho-gen.png",
+      "id": "N2XKvwB"
+    }
+  ],
+  "orders": [
+    {
+      "id": "d5a9a1c2-be1a-4b38-8271-b5949a87c087",
+      "clientId": "7d63e09b-6ea3-4f5f-b013-471d9586e37d",
+      "clientName": "DAVIES",
+      "clientLocal": "PICA LOS 3 HERMANOS",
+      "sellerId": 1,
+      "items": [
+        {
+          "productId": "ctZ8mUx",
+          "name": "RUCAPELLAN CLASICO",
+          "sku": "C001",
+          "imageUrl": "/uploads/1756863800207_ruca-clasico.png",
+          "qty": 90,
+          "price": 2090,
+          "subtotal": 188100
+        }
+      ],
+      "total": 188100,
+      "status": "entregado",
+      "deliveryDate": "2025-09-04",
+      "invoice": true,
+      "createdAt": "2025-09-03T01:52:33.633Z",
+      "paymentMethod": "transferencia",
+      "invoiceSent": false
+    },
+    {
+      "id": "81a56efa-4271-4107-a5a0-5bb86c05c72b",
+      "clientId": "33cac238-a654-446f-9066-33d062dd3c37",
+      "clientName": "JACQUE",
+      "clientLocal": "BOTILLERIA BODEGA DE JACQUE",
+      "sellerId": 1,
+      "items": [
+        {
+          "productId": "ctZ8mUx",
+          "name": "RUCAPELLAN CLASICO",
+          "sku": "C001",
+          "imageUrl": "/uploads/1756863800207_ruca-clasico.png",
+          "qty": 40,
+          "price": 2090,
+          "subtotal": 83600
+        }
+      ],
+      "total": 83600,
+      "status": "pendiente",
+      "deliveryDate": "2025-09-03",
+      "invoice": false,
+      "createdAt": "2025-09-03T01:58:47.500Z"
+    },
+    {
+      "id": "5f42fade-c73d-45fe-9fbe-ff0e3a0c1a93",
+      "clientId": "9b9370fc-6b2d-4b02-87d3-6c331154833e",
+      "clientName": "VERONICA",
+      "clientLocal": "LOCAL CAMILO HENRIQUEZ",
+      "sellerId": 1,
+      "items": [
+        {
+          "productId": "ctZ8mUx",
+          "name": "RUCAPELLAN CLASICO",
+          "sku": "C001",
+          "imageUrl": "/uploads/1756863800207_ruca-clasico.png",
+          "qty": 20,
+          "price": 2090,
+          "subtotal": 41800
+        }
+      ],
+      "total": 41800,
+      "status": "entregado",
+      "deliveryDate": "2025-09-02",
+      "invoice": false,
+      "createdAt": "2025-09-03T02:01:13.889Z"
+    },
+    {
+      "id": "e36f6ab0-668d-432d-a627-71c8e45d4401",
+      "clientId": "4478ffbd-7e71-4709-b05a-55709cdc352e",
+      "clientName": "CLAUDIA",
+      "clientLocal": "BOTILLERIA ARANCIBIA",
+      "sellerId": 1,
+      "items": [
+        {
+          "productId": "ctZ8mUx",
+          "name": "RUCAPELLAN CLASICO",
+          "sku": "C001",
+          "imageUrl": "/uploads/1756863800207_ruca-clasico.png",
+          "qty": 30,
+          "price": 2000,
+          "subtotal": 60000
+        }
+      ],
+      "total": 60000,
+      "status": "entregado",
+      "deliveryDate": "2025-09-02",
+      "invoice": false,
+      "createdAt": "2025-09-03T02:01:28.901Z"
+    },
+    {
+      "id": "0605806f-0b65-4908-b5d1-ea85a500dfbe",
+      "clientId": "72287452-cd60-4476-a9b1-e50fbd5d6228",
+      "clientName": "SANDRA FUENTES",
+      "clientLocal": "BOTILLERIA PARAISO",
+      "sellerId": 1,
+      "items": [
+        {
+          "productId": "4neClys",
+          "name": "RUCAPELLAN MEZCLA",
+          "sku": "C002",
+          "imageUrl": "/uploads/1756863818328_ruca-mezcla.png",
+          "qty": 150,
+          "price": 2000,
+          "subtotal": 300000
+        },
+        {
+          "productId": "ctZ8mUx",
+          "name": "RUCAPELLAN CLASICO",
+          "sku": "C001",
+          "imageUrl": "/uploads/1756863800207_ruca-clasico.png",
+          "qty": 50,
+          "price": 2000,
+          "subtotal": 100000
+        }
+      ],
+      "total": 400000,
+      "status": "pendiente",
+      "deliveryDate": "2025-09-06",
+      "invoice": true,
+      "createdAt": "2025-09-03T02:02:03.068Z",
+      "paid": true,
+      "invoiceSent": false
+    },
+    {
+      "id": "7f4ae728-17fd-457c-9d28-6770e2a32b10",
+      "clientId": "72ef3366-f255-48c4-9bb1-9c904e4f2216",
+      "clientName": "ISABEL",
+      "clientLocal": "BOTILLERIA ITALIA",
+      "sellerId": 1,
+      "items": [
+        {
+          "productId": "ctZ8mUx",
+          "name": "RUCAPELLAN CLASICO",
+          "sku": "C001",
+          "imageUrl": "/uploads/1756863800207_ruca-clasico.png",
+          "qty": 60,
+          "price": 2090,
+          "subtotal": 125400
+        }
+      ],
+      "total": 125400,
+      "status": "pendiente",
+      "deliveryDate": "2025-09-03",
+      "invoice": true,
+      "createdAt": "2025-09-03T02:03:22.385Z"
+    }
+  ]
+}
