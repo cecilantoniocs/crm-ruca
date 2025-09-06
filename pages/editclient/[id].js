@@ -1,3 +1,4 @@
+// pages/editclient/[id].js
 import React, { useEffect, useState } from 'react';
 import Layout from '../../components/Layout';
 import { useRouter } from 'next/router';
@@ -14,7 +15,7 @@ const normalizePhoneCL = (val) => {
   if (!val) return '';
   const digits = val.replace(/[^\d]/g, '');
   if (val.startsWith('+56')) return `+56${digits.replace(/^56/, '').replace(/^0+/, '')}`;
-  if (val.startsWith('56')) return `+56${digits.replace(/^56/, '').replace(/^0+/, '')}`;
+  if (val.startsWith('56'))  return `+56${digits.replace(/^56/, '').replace(/^0+/, '')}`;
   return `+56${digits.replace(/^0+/, '')}`;
 };
 
@@ -113,14 +114,32 @@ const EditClient = () => {
   const [loadError, setLoadError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Carga del cliente
   useEffect(() => {
     if (!id) return;
     (async () => {
       try {
         setLoading(true);
         setLoadError('');
-        const res = await axiosClient.get(`users/${id}`);
-        setClient(res.data);
+        const res = await axiosClient.get(`clients/${id}`);
+        const c = res.data || {};
+
+        // 🔁 Normalizamos la forma para el formulario (usa nombre_local)
+        const formShape = {
+          id: c.id,
+          name: c.name || '',
+          nombre_local: c.nombre_local ?? c.local_name ?? '',
+          dir1: c.dir1 || '',
+          zona: c.zona || '',
+          ciudad: c.ciudad || '',
+          telefono: phoneToDigitsCL(c.telefono || ''),
+          email: c.email || '',
+          rut: c.rut || '',
+          razon_social: c.razon_social || '',
+          sellerId: c.sellerId ?? c.owner_id ?? null,
+        };
+
+        setClient(formShape);
       } catch (err) {
         console.error(err);
         setLoadError(
@@ -141,8 +160,7 @@ const EditClient = () => {
       dir1: client?.dir1 || '',
       zona: client?.zona || '',
       ciudad: client?.ciudad || '',
-      // mostramos solo dígitos en el input (sin +56)
-      telefono: phoneToDigitsCL(client?.telefono || ''),
+      telefono: client?.telefono || '',
       email: client?.email || '',
       rut: client?.rut || '',
       razon_social: client?.razon_social || '',
@@ -160,7 +178,7 @@ const EditClient = () => {
         .required('El teléfono es obligatorio'),
       email: Yup.string().email('Email inválido').required('El email es obligatorio'),
       rut: Yup.string().test('rut-basic', 'RUT inválido (ej: 12345678-9)', validateRutBasic),
-      razon_social: Yup.string(), // opcional
+      razon_social: Yup.string(),
     }),
     onSubmit: async (val) => {
       try {
@@ -169,17 +187,21 @@ const EditClient = () => {
         // reconstruye el teléfono con +56
         const telefonoFull = normalizePhoneCL(`+56${val.telefono}`);
 
-        // preserva campos que no editas (JSON Server + PATCH)
-        const payload = {
-          ...val,
+        // 🔁 Mapea a nombres de columna de la BD (snake_case)
+        const patch = {
+          name: val.name,
+          local_name: val.nombre_local,
+          dir1: val.dir1,
+          zona: val.zona,
+          ciudad: val.ciudad,
           telefono: telefonoFull,
-          id: client?.id,
-          sellerId: client?.sellerId,
-          role: client?.role,
+          email: val.email,
           rut: normalizeRut(val.rut),
+          razon_social: val.razon_social,
+          owner_id: client?.sellerId ?? null,
         };
 
-        await axiosClient.patch(`users/${id}`, payload);
+        await axiosClient.patch(`clients/${id}`, patch);
 
         await Swal.fire('Editado', 'Cliente actualizado correctamente.', 'success');
         router.push('/client');
