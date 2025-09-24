@@ -7,7 +7,7 @@
     "icons": "pwa-asset-generator public/brand/rucapellan-logo.png public --favicon --apple-touch-icon --mstile --manifest public/site.webmanifest --padding '10%' --background '#ffffff'",
     "build": "npm run icons && next build",
     "start": "next start",
-    "vercel-build": "npm run icons && next build"
+    "vercel-build": "next build"
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",
