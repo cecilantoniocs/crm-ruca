@@ -1,3 +1,4 @@
+// pages/neworder.js
 import React, { useEffect, useMemo, useState } from 'react';
 import Layout from '../components/Layout';
 import { useRouter } from 'next/router';
@@ -15,23 +16,20 @@ const CREATE_STATUS_OPTIONS = [
 
 const norm = (v) => (v ?? '').toString().trim().toLowerCase();
 
-
 const NewOrder = () => {
   const router = useRouter();
 
   const [clients, setClients] = useState([]);
   const [products, setProducts] = useState([]);
+  const [couriers, setCouriers] = useState([]);          // repartidores
+  const [selectedCourierId, setSelectedCourierId] = useState(''); // repartidor elegido (opcional)
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // ---------- Estado del formulario ----------
   const [clientOpt, setClientOpt] = useState(null);
   const [items, setItems] = useState([{ id: uuidv4(), product: null, qty: 1, price: '' }]);
   const [deliveryDate, setDeliveryDate] = useState('');
-
-  // Opciones de estado SOLO para crear (allowlist explícita)
-const [status, setStatus] = useState(CREATE_STATUS_OPTIONS[0]); // 'pendiente' por defecto
-
-
+  const [status, setStatus] = useState(CREATE_STATUS_OPTIONS[0]); // 'pendiente' por defecto
   const [invoice, setInvoice] = useState(false);
 
   // ---------- Carga de datos ----------
@@ -47,9 +45,14 @@ const [status, setStatus] = useState(CREATE_STATUS_OPTIONS[0]); // 'pendiente' p
         }
         const resP = await axiosClient.get('products');
         setProducts(resP?.data ?? []);
+
+        // carga usuarios y filtra a quienes pueden repartir
+        const resU = await axiosClient.get('users'); // /api/users
+        const cour = (resU?.data ?? []).filter(u => !!u.canDeliver);
+        setCouriers(cour);
       } catch (e) {
         console.error(e);
-        Swal.fire('Error', 'No fue posible cargar clientes o productos.', 'error');
+        Swal.fire('Error', 'No fue posible cargar clientes, productos o repartidores.', 'error');
       }
     })();
   }, []);
@@ -162,7 +165,7 @@ const [status, setStatus] = useState(CREATE_STATUS_OPTIONS[0]); // 'pendiente' p
           productId: p?.id,
           name: p?.name,
           sku: p?.sku,
-          imageUrl: p?.imageUrl,
+          imageUrl: p?.imageUrl ?? p?.image_url ?? null,
           qty: Number(it.qty),
           price: Number(it.price),
           subtotal: Number(it.qty) * Number(it.price),
@@ -175,17 +178,17 @@ const [status, setStatus] = useState(CREATE_STATUS_OPTIONS[0]); // 'pendiente' p
         clientName: client?.name,
         clientLocal: client?.nombre_local,
         sellerId: seller?.id || null,
+        deliveredBy: selectedCourierId || null,   // repartidor asignado (opcional)
         items: builtItems,
         total,
-        status: norm(status.value),      // 'pendiente' | 'entregado'
-        deliveryDate,                    // YYYY-MM-DD
-        invoice: Boolean(invoice),       // true/false
+        status: norm(status.value),               // 'pendiente' | 'entregado'
+        deliveryDate,                             // YYYY-MM-DD
+        invoice: Boolean(invoice),                // true/false
         createdAt: new Date().toISOString(),
       };
 
       await axiosClient.post('orders', order);
 
-      // Si se crea directamente como "entregado", pasa al módulo ventas
       if (norm(status.value) === 'entregado') {
         const sale = {
           id: uuidv4(),
@@ -219,14 +222,14 @@ const [status, setStatus] = useState(CREATE_STATUS_OPTIONS[0]); // 'pendiente' p
     <Layout>
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 tracking-tight">
-          Nuevo <span className="text-indigo-600">Pedido</span>
+        <h1 className="text-2xl sm:text-3xl font-bold text-coffee tracking-tight">
+          Nuevo <span className="text-brand-600">Pedido</span>
         </h1>
 
         <button
           type="button"
           onClick={() => router.back()}
-          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 active:scale-95 transition"
+          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-coffee hover:bg-gray-50 active:scale-95 transition"
           title="Atrás"
         >
           <ArrowLeft size={16} />
@@ -241,7 +244,7 @@ const [status, setStatus] = useState(CREATE_STATUS_OPTIONS[0]); // 'pendiente' p
         >
           {/* Cliente */}
           <div className="mb-5">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-coffee mb-1">
               Cliente
             </label>
             <Select
@@ -259,13 +262,13 @@ const [status, setStatus] = useState(CREATE_STATUS_OPTIONS[0]); // 'pendiente' p
           {/* Items */}
           <div className="mb-5">
             <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-gray-700">
+              <label className="block text-sm font-medium text-coffee">
                 Productos
               </label>
               <button
                 type="button"
                 onClick={addItem}
-                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow hover:bg-indigo-700 active:scale-95 transition"
+                className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white shadow hover:bg-brand-700 active:scale-95 transition"
               >
                 <Plus size={16} />
                 Añadir producto
@@ -310,7 +313,7 @@ const [status, setStatus] = useState(CREATE_STATUS_OPTIONS[0]); // 'pendiente' p
                       type="number"
                       min={1}
                       step={1}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm"
                       value={it.qty}
                       onChange={(e) =>
                         updateItem(it.id, { qty: e.target.value.replace(/[^\d]/g, '') || 1 })
@@ -331,7 +334,7 @@ const [status, setStatus] = useState(CREATE_STATUS_OPTIONS[0]); // 'pendiente' p
                         type="number"
                         min={0}
                         step="1"
-                        className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm"
+                        className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm"
                         value={it.price}
                         onChange={(e) =>
                           updateItem(it.id, { price: e.target.value.replace(/[^\d.]/g, '') })
@@ -342,7 +345,7 @@ const [status, setStatus] = useState(CREATE_STATUS_OPTIONS[0]); // 'pendiente' p
 
                   {/* Subtotal */}
                   <div className="md:col-span-1 flex items-end">
-                    <div className="w-full text-right text-sm font-medium text-gray-800">
+                    <div className="w-full text-right text-sm font-medium text-coffee">
                       {Number(it.qty) > 0 && Number(it.price) > 0
                         ? CLP.format(Number(it.qty) * Number(it.price))
                         : '—'}
@@ -365,11 +368,11 @@ const [status, setStatus] = useState(CREATE_STATUS_OPTIONS[0]); // 'pendiente' p
             </div>
           </div>
 
-          {/* Fecha de entrega + Estado + Factura */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+          {/* Fecha de entrega + Estado + Factura + Repartidor */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-5">
             {/* Fecha */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+            <div className="md:col-span-1">
+              <label className="block text-sm font-medium text-coffee mb-1">
                 Fecha de entrega
               </label>
               <div className="relative">
@@ -378,7 +381,7 @@ const [status, setStatus] = useState(CREATE_STATUS_OPTIONS[0]); // 'pendiente' p
                 </span>
                 <input
                   type="date"
-                  className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm"
+                  className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm"
                   value={deliveryDate}
                   onChange={(e) => setDeliveryDate(e.target.value)}
                   min={todayISO()}
@@ -386,9 +389,9 @@ const [status, setStatus] = useState(CREATE_STATUS_OPTIONS[0]); // 'pendiente' p
               </div>
             </div>
 
-            {/* Estado (solo pendiente / entregado) */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Estado</label>
+            {/* Estado */}
+            <div className="md:col-span-1">
+              <label className="block text-sm font-medium text-coffee mb-1">Estado</label>
               <Select
                 options={CREATE_STATUS_OPTIONS}
                 value={status}
@@ -400,16 +403,35 @@ const [status, setStatus] = useState(CREATE_STATUS_OPTIONS[0]); // 'pendiente' p
             </div>
 
             {/* Factura */}
-            <div className="flex items-end">
-              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+            <div className="md:col-span-1 flex items-end">
+              <label className="inline-flex items-center gap-2 text-sm text-coffee">
                 <input
                   type="checkbox"
-                  className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
                   checked={invoice}
                   onChange={(e) => setInvoice(e.target.checked)}
                 />
                 Factura (sí/no)
               </label>
+            </div>
+
+            {/* Repartidor */}
+            <div className="md:col-span-1">
+              <label className="block text-sm font-medium text-coffee mb-1">
+                Repartidor asignado
+              </label>
+              <select
+                value={selectedCourierId}
+                onChange={(e) => setSelectedCourierId(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600"
+              >
+                <option value="">— Seleccionar —</option>
+                {couriers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.role})
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -419,7 +441,7 @@ const [status, setStatus] = useState(CREATE_STATUS_OPTIONS[0]); // 'pendiente' p
               <User size={16} className="text-gray-400" />
               {clientOpt?.label || 'Sin cliente'}
             </div>
-            <div className="text-lg font-semibold text-gray-900">
+            <div className="text-lg font-semibold text-coffee">
               Total: {CLP.format(total || 0)}
             </div>
           </div>
@@ -429,7 +451,7 @@ const [status, setStatus] = useState(CREATE_STATUS_OPTIONS[0]); // 'pendiente' p
             <button
               type="button"
               onClick={() => router.push('/orders')}
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 active:scale-95 transition"
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-coffee hover:bg-gray-50 active:scale-95 transition"
               title="Cancelar"
             >
               Cancelar
@@ -437,7 +459,7 @@ const [status, setStatus] = useState(CREATE_STATUS_OPTIONS[0]); // 'pendiente' p
             <button
               type="submit"
               disabled={isSubmitting}
-              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed active:scale-95 transition"
+              className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-brand-700 disabled:opacity-60 disabled:cursor-not-allowed active:scale-95 transition"
               title="Crear pedido"
             >
               <PackagePlus size={16} />

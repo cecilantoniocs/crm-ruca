@@ -7,13 +7,12 @@ import {
   Search,
   Calendar,
   CalendarRange,
-  Receipt,
-  DollarSign,
+  Navigation,
   Truck,
   Users as UsersIcon,
-  Navigation,
 } from 'lucide-react';
 
+// ==== Helpers ===============================================================
 const statusToString = (val) => {
   if (val == null) return '';
   if (typeof val === 'string') return val.trim().toLowerCase();
@@ -40,27 +39,27 @@ const labelSocio = (user) => {
   return user.partnerTag ? String(user.partnerTag).toUpperCase() : (user.name || '—');
 };
 
-// === helper pill método de pago (solo display)
+// ===== Pills: UNA sola base para que TODAS midan igual ======================
+// ⬇⬇⬇ AQUÍ está el tamaño de fuente de las pills: `text-xs` (12px) ⬇⬇⬇
+const PILL =
+  'inline-flex items-center justify-center h-6 px-2 rounded-full text-xs leading-none ring-1 font-medium whitespace-nowrap';
+
+// Método de pago (display)
 const paymentToString = (val) => {
   if (!val) return 'efectivo';
   const v = String(val).trim().toLowerCase();
   return v === 'transferencia' ? 'transferencia' : 'efectivo';
 };
-const PaymentPill = ({ value, size = 'md' }) => {
+const PaymentPill = ({ value }) => {
   const v = paymentToString(value);
-  const label = v === 'transferencia' ? 'Transferencia' : 'Efectivo';
   const color =
     v === 'transferencia'
-      ? 'bg-indigo-50 text-indigo-700 ring-indigo-200'
+      ? 'bg-brand-50 text-brand-700 ring-brand-200'
       : 'bg-sky-50 text-sky-700 ring-sky-200';
-  const sizing = size === 'sm' ? 'px-2 py-0.5 text-[11px]' : 'px-2.5 py-1 text-xs';
-  return (
-    <span className={`inline-flex items-center rounded-full ring-1 font-medium ${color} ${sizing}`}>
-      {label}
-    </span>
-  );
+  return <span className={`${PILL} ${color}`}>{v === 'transferencia' ? 'Transferencia' : 'Efectivo'}</span>;
 };
 
+// ==== Page ==================================================================
 const SalesPage = () => {
   const router = useRouter();
 
@@ -90,16 +89,12 @@ const SalesPage = () => {
         setLoading(true);
         setLoadError('');
 
-        // Ventas (solo entregadas) desde API nueva
         const resO = await axiosClient.get('sales');
-        const list = resO?.data ?? [];
-        setOrders(list);
+        setOrders(resO?.data ?? []);
 
-        // Clientes desde API de clientes
         const resC = await axiosClient.get('clients');
         setClients(resC?.data ?? []);
 
-        // Usuarios del sistema (admin/vendedor/repartidor)
         const resU = await axiosClient.get('users');
         setUsers(resU?.data ?? []);
       } catch (e) {
@@ -129,7 +124,6 @@ const SalesPage = () => {
     [users]
   );
 
-  // Opciones socio (placeholder simple)
   const socioOptions = [{ id: 'all', label: 'Todos' }];
 
   // Rango auto
@@ -137,7 +131,7 @@ const SalesPage = () => {
     if (quickRange === 'range') return;
     const now = new Date();
     let start;
-    let end = endOfDay(now);
+    const end = endOfDay(now);
 
     if (quickRange === 'today') {
       start = startOfDay(now);
@@ -199,7 +193,6 @@ const SalesPage = () => {
     return rows;
   }, [orders, searchTerm, fromDate, toDate, partnerFilter, courierFilter, clientMap]);
 
-  // Totales (No pagadas)
   const totals = useMemo(() => {
     const count = filtered.length;
     const sum = filtered.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
@@ -208,11 +201,9 @@ const SalesPage = () => {
     return { count, sum, unpaid, invoiced };
   }, [filtered]);
 
-  // Patch local
   const applyLocal = (id, patch) =>
     setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, ...patch } : o)));
 
-  // Pago: toggle pagado/no pagado
   const togglePaid = async (id) => {
     const prev = orders.find((o) => o.id === id);
     if (!prev) return;
@@ -227,7 +218,6 @@ const SalesPage = () => {
     }
   };
 
-  // Factura enviada (respeta si el pedido es con/sin factura)
   const toggleInvoiceSent = async (id) => {
     const prev = orders.find((o) => o.id === id);
     if (!prev) return;
@@ -269,53 +259,55 @@ const SalesPage = () => {
     }
   };
 
+  // ==== UI ==================================================================
   return (
     <Layout>
       {/* Header + KPIs */}
       <div className="mb-6 space-y-3 sm:space-y-0 sm:flex sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-800 tracking-tight">
-            Panel de <span className="text-indigo-600">Ventas</span>
+          <h1 className="text-3xl font-bold text-coffee tracking-tight">
+            Panel de <span className="text-brand-600">Ventas</span>
           </h1>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
             <div className="text-gray-500">Ventas</div>
-            <div className="font-semibold text-gray-900">{totals.count}</div>
+            <div className="font-semibold text-coffee">{totals.count}</div>
           </div>
           <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
             <div className="text-gray-500">Total</div>
-            <div className="font-semibold text-gray-900">{CLP.format(totals.sum)}</div>
+            <div className="font-semibold text-coffee">{CLP.format(totals.sum)}</div>
           </div>
           <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
-            <div className="text-gray-500">No pagadas</div>
+            <div className="text-gray-500">Por cobrar</div>
             <div className="font-semibold text-rose-700">{totals.unpaid}</div>
           </div>
           <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
             <div className="text-gray-500">Facturadas</div>
-            <div className="font-semibold text-indigo-700">{totals.invoiced}</div>
+            <div className="font-semibold text-brand-700">{totals.invoiced}</div>
           </div>
         </div>
       </div>
 
       {/* Filtros */}
-      <div className="mb-4 flex flex-col gap-3 sm:items-end sm:flex-row sm:justify-between">
+      <div className="mb-4 space-y-3">
         {/* Buscador */}
-        <div className="relative w-full max-w-md">
+        <div className="relative w-full">
           <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
           <input
             type="text"
             placeholder="Buscar por cliente o local…"
-            className="pl-10 pr-4 py-2 w-full rounded-lg border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm"
+            className="pl-10 pr-4 py-2 w-full rounded-lg border border-gray-300 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
 
-        {/* Rango + selects */}
-        <div className="w-full sm:w-auto flex flex-col sm:flex-row gap-2 sm:items-center">
-          <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden">
+        {/* Fila de controles */}
+        <div className="w-full flex flex-wrap items-center gap-2">
+          {/* Botonera rango */}
+          <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden shrink-0">
             <button
               className={`px-3 py-2 text-sm ${quickRange === 'today' ? 'bg-gray-900 text-white' : 'bg-white hover:bg-gray-50'}`}
               onClick={() => setQuickRange('today')}
@@ -347,59 +339,58 @@ const SalesPage = () => {
             </button>
           </div>
 
-          {/* Rango manual */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2">
-              <Calendar size={16} className="text-gray-500" />
-              <input
-                type="date"
-                className="border border-gray-300 rounded-lg px-2 py-1 text-sm"
-                value={fromDate}
-                onChange={(e) => {
-                  setQuickRange('range');
-                  setFromDate(e.target.value);
-                }}
-              />
-              <span className="text-gray-500 text-xs">a</span>
-              <input
-                type="date"
-                className="border border-gray-300 rounded-lg px-2 py-1 text-sm"
-                value={toDate}
-                onChange={(e) => {
-                  setQuickRange('range');
-                  setToDate(e.target.value);
-                }}
-              />
+          {/* Rango manual: inputs más anchos pero sin desbordar */}
+          <div className="flex items-center gap-2 flex-none">
+            <Calendar size={16} className="text-gray-500 shrink-0" />
+            <input
+              type="date"
+              className="border border-gray-300 rounded-lg px-2 py-1 text-sm w-[150px] sm:w-[170px] shrink-0"
+              value={fromDate}
+              onChange={(e) => {
+                setQuickRange('range');
+                setFromDate(e.target.value);
+              }}
+            />
+            <span className="text-gray-500 text-xs shrink-0">a</span>
+            <input
+              type="date"
+              className="border border-gray-300 rounded-lg px-2 py-1 text-sm w-[150px] sm:w-[170px] shrink-0"
+              value={toDate}
+              onChange={(e) => {
+                setQuickRange('range');
+                setToDate(e.target.value);
+              }}
+            />
+          </div>
+
+          {/* Selects Socio + Repartidor — grid 2 columnas, mismo ancho */}
+          <div className="grid grid-cols-2 gap-2 w-full sm:w-auto">
+            <div className="flex items-center gap-2 min-w-[170px]">
+              <UsersIcon size={16} className="text-gray-500 shrink-0" />
+              <select
+                className="border border-gray-300 rounded-lg px-2 py-1 text-sm bg-white w-full"
+                value={partnerFilter}
+                onChange={(e) => setPartnerFilter(e.target.value)}
+              >
+                {socioOptions.map((s) => (
+                  <option key={s.id} value={s.id}>{s.label}</option>
+                ))}
+              </select>
             </div>
-          </div>
 
-          {/* Socio */}
-          <div className="flex items-center gap-2">
-            <UsersIcon size={16} className="text-gray-500" />
-            <select
-              className="border border-gray-300 rounded-lg px-2 py-1 text-sm bg-white"
-              value={partnerFilter}
-              onChange={(e) => setPartnerFilter(e.target.value)}
-            >
-              {socioOptions.map((s) => (
-                <option key={s.id} value={s.id}>{s.label}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Repartidor */}
-          <div className="flex items-center gap-2">
-            <Truck size={16} className="text-gray-500" />
-            <select
-              className="border border-gray-300 rounded-lg px-2 py-1 text-sm bg-white"
-              value={courierFilter}
-              onChange={(e) => setCourierFilter(e.target.value)}
-            >
-              <option value="all">Todos</option>
-              {repartidores.map((r) => (
-                <option key={r.id} value={r.id}>{r.name || 'Repartidor'}</option>
-              ))}
-            </select>
+            <div className="flex items-center gap-2 min-w-[170px]">
+              <Truck size={16} className="text-gray-500 shrink-0" />
+              <select
+                className="border border-gray-300 rounded-lg px-2 py-1 text-sm bg-white w-full"
+                value={courierFilter}
+                onChange={(e) => setCourierFilter(e.target.value)}
+              >
+                <option value="all">Todos</option>
+                {repartidores.map((r) => (
+                  <option key={r.id} value={r.id}>{r.name || 'Repartidor'}</option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
       </div>
@@ -425,23 +416,23 @@ const SalesPage = () => {
               : 'Sin factura';
             const invoiceCls = o.invoice
               ? (o.invoiceSent
-                  ? 'bg-indigo-50 text-indigo-700 ring-indigo-200'
-                  : 'bg-gray-50 text-gray-700 ring-gray-200')
+                  ? 'bg-brand-50 text-brand-700 ring-brand-200'
+                  : 'bg-gray-50 text-coffee ring-gray-200')
               : 'bg-gray-50 text-gray-500 ring-gray-200';
 
             return (
               <div key={o.id} className="bg-white rounded-xl shadow p-3 border border-gray-100">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="text-base font-semibold text-gray-900">{o.clientName || '—'}</h3>
+                    <h3 className="text-base font-semibold text-coffee">{o.clientName || '—'}</h3>
                     <p className="text-sm text-gray-600">{o.clientLocal || '—'}</p>
                   </div>
                   <div className="text-sm text-gray-500">{fmtDate(o.deliveredAt || o.deliveryDate)}</div>
                 </div>
 
                 <div className="mt-2 flex items-center justify-between">
-                  <p className="text-sm text-gray-700">
-                    <span className="font-medium text-gray-900">Dirección: </span>
+                  <p className="text-sm text-coffee">
+                    <span className="font-medium text-coffee">Dirección: </span>
                     {addr}
                   </p>
                   {addr && (
@@ -449,7 +440,7 @@ const SalesPage = () => {
                       href={mapsUrl(addr)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-50 text-brand-600 hover:bg-brand-100 border border-brand-200"
                       title="Abrir en Google Maps"
                       aria-label="Abrir en Google Maps"
                     >
@@ -458,7 +449,7 @@ const SalesPage = () => {
                   )}
                 </div>
 
-                <div className="mt-2 text-sm text-gray-700 flex items-center justify-between">
+                <div className="mt-2 text-sm text-coffee flex items-center justify-between">
                   <span>
                     <span className="text-gray-500">Socio: </span>{labelSocio(owner)}
                   </span>
@@ -474,10 +465,10 @@ const SalesPage = () => {
                     {(o.items ?? []).length === 0 && <li className="text-gray-500">Sin productos</li>}
                     {(o.items ?? []).map((it, i) => (
                       <li key={i} className="flex items-center justify-between">
-                        <span className="text-gray-700">
+                        <span className="text-coffee">
                           {it.name || 'Producto'} × {it.qty}
                         </span>
-                        <span className="text-gray-900 font-medium">
+                        <span className="text-coffee font-medium">
                           {CLP.format(Number(it.subtotal) || (Number(it.qty) * Number(it.price) || 0))}
                         </span>
                       </li>
@@ -485,38 +476,34 @@ const SalesPage = () => {
                   </ul>
                 </div>
 
-                {/* Método + Pago + Factura + Total (compacto) */}
+                {/* Método + Pago + Factura (mismo tamaño) + Total */}
                 <div className="mt-3 flex items-end justify-between gap-2">
                   <div className="flex items-center gap-1.5 flex-wrap max-w-[70%]">
-                    <PaymentPill value={o.paymentMethod} size="sm" />
+                    <PaymentPill value={o.paymentMethod} />
                     <button
                       type="button"
                       onClick={() => togglePaid(o.id)}
-                      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] ring-1 ${
+                      className={`${PILL} ${
                         o.paid
                           ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
-                          : 'bg-gray-50 text-gray-700 ring-gray-200'
+                          : 'bg-gray-50 text-coffee ring-gray-200'
                       }`}
                       title="Marcar pago"
                     >
-                      <DollarSign size={12} />
                       {o.paid ? 'Pagado' : 'No pagado'}
                     </button>
                     <button
                       type="button"
                       onClick={() => o.invoice && toggleInvoiceSent(o.id)}
                       disabled={!o.invoice}
-                      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] ring-1 ${invoiceCls} ${
-                        !o.invoice ? 'cursor-not-allowed opacity-70' : ''
-                      }`}
+                      className={`${PILL} ${invoiceCls} ${!o.invoice ? 'cursor-not-allowed opacity-70' : ''}`}
                       title={o.invoice ? 'Marcar facturación' : 'Pedido sin factura'}
                     >
-                      <Receipt size={12} />
                       {invoiceLabel}
                     </button>
                   </div>
 
-                  <div className="text-base font-semibold text-gray-900 shrink-0">
+                  <div className="text-base font-semibold text-coffee shrink-0">
                     {CLP.format(Number(o.total) || 0)}
                   </div>
                 </div>
@@ -559,18 +546,18 @@ const SalesPage = () => {
                       : 'Sin factura';
                     const invoiceCls = o.invoice
                       ? (o.invoiceSent
-                          ? 'bg-indigo-50 text-indigo-700 ring-indigo-200'
-                          : 'bg-gray-50 text-gray-700 ring-gray-200')
+                          ? 'bg-brand-50 text-brand-700 ring-brand-200'
+                          : 'bg-gray-50 text-coffee ring-gray-200')
                       : 'bg-gray-50 text-gray-500 ring-gray-200';
 
                     return (
                       <React.Fragment key={o.id}>
                         <tr className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-colors`}>
-                          <td className="px-6 py-3 text-sm text-gray-700">{fmtDate(o.deliveredAt || o.deliveryDate)}</td>
-                          <td className="px-6 py-3 text-sm text-gray-900">{o.clientName || '—'}</td>
-                          <td className="px-6 py-3 text-sm text-gray-700">{o.clientLocal || '—'}</td>
-                          <td className="px-6 py-3 text-sm text-gray-700">{labelSocio(owner)}</td>
-                          <td className="px-6 py-3 text-sm text-gray-700">{courier?.name || '—'}</td>
+                          <td className="px-6 py-3 text-sm text-coffee">{fmtDate(o.deliveredAt || o.deliveryDate)}</td>
+                          <td className="px-6 py-3 text-sm text-coffee">{o.clientName || '—'}</td>
+                          <td className="px-6 py-3 text-sm text-coffee">{o.clientLocal || '—'}</td>
+                          <td className="px-6 py-3 text-sm text-coffee">{labelSocio(owner)}</td>
+                          <td className="px-6 py-3 text-sm text-coffee">{courier?.name || '—'}</td>
                           <td className="px-6 py-3 text-sm text-center">{items.length}</td>
                           <td className="px-6 py-3 text-sm">
                             <PaymentPill value={o.paymentMethod} />
@@ -580,12 +567,9 @@ const SalesPage = () => {
                               type="button"
                               onClick={() => o.invoice && toggleInvoiceSent(o.id)}
                               disabled={!o.invoice}
-                              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs ring-1 ${invoiceCls} ${
-                                !o.invoice ? 'cursor-not-allowed opacity-70' : ''
-                              }`}
+                              className={`${PILL} ${invoiceCls} ${!o.invoice ? 'cursor-not-allowed opacity-70' : ''}`}
                               title={o.invoice ? 'Marcar facturación' : 'Pedido sin factura'}
                             >
-                              <Receipt size={14} />
                               {invoiceLabel}
                             </button>
                           </td>
@@ -593,27 +577,26 @@ const SalesPage = () => {
                             <button
                               type="button"
                               onClick={() => togglePaid(o.id)}
-                              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs ring-1 ${
+                              className={`${PILL} ${
                                 o.paid
                                   ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
-                                  : 'bg-gray-50 text-gray-700 ring-gray-200'
+                                  : 'bg-gray-50 text-coffee ring-gray-200'
                               }`}
                               title="Marcar pago"
                             >
-                              <DollarSign size={14} />
                               {o.paid ? 'Pagado' : 'No pagado'}
                             </button>
                           </td>
-                          <td className="px-6 py-3 text-sm text-right font-medium text-gray-900">
+                          <td className="px-6 py-3 text-sm text-right font-medium text-coffee">
                             {CLP.format(Number(o.total) || 0)}
                           </td>
                         </tr>
 
-                        {/* Detalle de productos (SIEMPRE visible) */}
+                        {/* Detalle de productos */}
                         <tr className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                           <td colSpan={10} className="px-6 pb-4">
                             <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 p-4">
-                              <h4 className="text-sm font-semibold text-gray-800 mb-2">Detalle de productos</h4>
+                              <h4 className="text-sm font-semibold text-coffee mb-2">Detalle de productos</h4>
                               <div className="overflow-x-auto">
                                 <table className="min-w-full">
                                   <thead>
@@ -624,7 +607,7 @@ const SalesPage = () => {
                                       <th className="py-1 pr-0 text-right">Subtotal</th>
                                     </tr>
                                   </thead>
-                                  <tbody className="text-sm text-gray-700">
+                                  <tbody className="text-sm text-coffee">
                                     {items.length === 0 && (
                                       <tr>
                                         <td colSpan={4} className="py-2 text-gray-500">Sin productos</td>

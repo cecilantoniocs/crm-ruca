@@ -6,9 +6,9 @@ import * as Yup from 'yup';
 import { useRouter } from 'next/router';
 import axiosClient from '../config/axios';
 import Swal from 'sweetalert2';
+import { getCurrentSeller } from '../helpers';
 import { ArrowLeft, UserPlus } from 'lucide-react';
 
-// ==== Helpers módulo ====
 const normalizeRut = (raw) => {
   if (!raw) return '';
   const clean = raw.replace(/\./g, '').replace(/[^0-9kK-]/g, '').toUpperCase();
@@ -21,23 +21,20 @@ const normalizeRut = (raw) => {
 };
 
 const validateRutBasic = (rut) => {
-  if (!rut) return true; // opcional
-  return /^\d{7,8}-[\dK]$/.test(rut); // simple
+  if (!rut) return true;
+  return /^\d{7,8}-[\dK]$/.test(rut);
 };
 
-// ==== Componentes “estables” ====
 function InputField({ formik, id, label, type = 'text', onChange, onBlur, ...rest }) {
   return (
     <div className="mb-4">
-      <label htmlFor={id} className="block text-sm font-medium text-gray-700 mb-1">
-        {label}
-      </label>
+      <label htmlFor={id} className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
       <input
         id={id}
         name={id}
         type={type}
         placeholder={label}
-        className="w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm"
+        className="w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600 text-sm"
         onChange={onChange ?? formik.handleChange}
         onBlur={onBlur ?? formik.handleBlur}
         value={formik.values[id]}
@@ -66,7 +63,7 @@ function PhoneInput({ formik }) {
           inputMode="numeric"
           maxLength={9}
           placeholder="9 dígitos"
-          className="w-full rounded-r-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm"
+          className="w-full rounded-r-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600 text-sm"
           value={formik.values.telefono}
           onChange={(e) => {
             const digitsOnly = e.target.value.replace(/\D/g, '');
@@ -83,7 +80,6 @@ function PhoneInput({ formik }) {
   );
 }
 
-// ==== Página ====
 const NewClient = () => {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -99,6 +95,8 @@ const NewClient = () => {
       email: '',
       rut: '',
       razon_social: '',
+      clientType: 'b2b',     // default B2B
+      clientOwner: '',       // requerido, empieza vacío
     },
     validationSchema: Yup.object({
       name: Yup.string().required('El nombre es obligatorio'),
@@ -106,50 +104,39 @@ const NewClient = () => {
       dir1: Yup.string().required('La dirección es obligatoria'),
       zona: Yup.string().required('La zona es obligatoria'),
       ciudad: Yup.string().required('La ciudad es obligatoria'),
-      telefono: Yup.string()
-        .matches(/^\d+$/, 'Solo números')
-        .min(8, 'Muy corto')
-        .max(9, 'Muy largo')
-        .required('El teléfono es obligatorio'),
+      telefono: Yup.string().matches(/^\d+$/, 'Solo números').min(8, 'Muy corto').max(9, 'Muy largo').required('El teléfono es obligatorio'),
       email: Yup.string().email('Email inválido').required('El email es obligatorio'),
       rut: Yup.string().test('rut-basic', 'RUT inválido (ej: 12345678-9)', validateRutBasic),
       razon_social: Yup.string(),
+      clientType: Yup.mixed().oneOf(['b2b','b2c']).required(),
+      clientOwner: Yup.mixed().oneOf(['rucapellan','cecil'], 'Selecciona una opción').required('Asignado a es obligatorio'),
     }),
     onSubmit: async (val) => {
       try {
         setIsSubmitting(true);
-
-        // usuario actual (para ownerId del cliente)
-        const me =
-          (typeof window !== 'undefined' &&
-            JSON.parse(localStorage.getItem('userData') || '{}')) ||
-          {};
-        const ownerId = me.id || me.sellerId || null;
-
+        const seller = getCurrentSeller?.();
+        if (!seller?.id) {
+          await Swal.fire('Error', 'No se encontró el vendedor actual', 'error');
+          return;
+        }
+        const telefonoFull = `+56${val.telefono}`;
         const payload = {
-          name: val.name,
-          local_name: val.nombre_local,  // mapeo al nombre de columna
-          dir1: val.dir1,
-          zona: val.zona,
-          ciudad: val.ciudad,
-          telefono: `+56${val.telefono}`,
-          email: val.email,
+          ...val,
+          telefono: telefonoFull,
           rut: normalizeRut(val.rut),
-          razon_social: val.razon_social,
-          ownerId, // el API lo mapea a owner_id
+          sellerId: seller.id,
+          // normalizamos por si vinieran capitalizadas
+          clientType: String(val.clientType || 'b2b').toLowerCase(),
+          clientOwner: String(val.clientOwner || '').toLowerCase(),
         };
 
         await axiosClient.post('clients', payload);
 
-        await Swal.fire(
-          '¡Cliente creado!',
-          'El cliente ha sido registrado con éxito.',
-          'success'
-        );
+        await Swal.fire('¡Cliente creado!', 'El cliente ha sido registrado con éxito.', 'success');
         router.push('/client');
       } catch (error) {
         console.error(error);
-        Swal.fire('Error', 'No se pudo crear el cliente.', 'error');
+        Swal.fire('Error', error?.response?.data?.error || 'No se pudo crear el cliente.', 'error');
       } finally {
         setIsSubmitting(false);
       }
@@ -158,10 +145,9 @@ const NewClient = () => {
 
   return (
     <Layout>
-      {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 tracking-tight">
-          Nuevo <span className="text-indigo-600">Cliente</span>
+        <h1 className="text-2xl sm:text-3xl font-bold text-coffee tracking-tight">
+          Nuevo <span className="text-brand-600">Cliente</span>
         </h1>
 
         <button
@@ -177,11 +163,7 @@ const NewClient = () => {
       </div>
 
       <div className="mx-auto w-full max-w-2xl">
-        <form
-          className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
-          onSubmit={formik.handleSubmit}
-          noValidate
-        >
+        <form className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm" onSubmit={formik.handleSubmit} noValidate>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <InputField formik={formik} id="name" label="Nombre" />
             <InputField formik={formik} id="nombre_local" label="Nombre del local" />
@@ -194,7 +176,47 @@ const NewClient = () => {
             <div className="md:col-span-2">
               <InputField formik={formik} id="email" label="Correo electrónico" type="email" />
             </div>
-            {/* Opcionales al final */}
+
+            {/* Tipo de cliente */}
+            <div className="md:col-span-1">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de cliente</label>
+              <select
+                id="clientType"
+                name="clientType"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600 text-sm bg-white"
+                value={formik.values.clientType}
+                onChange={formik.handleChange}
+                onBlur={formik.handleBlur}
+              >
+                <option value="b2b">B2B</option>
+                <option value="b2c">B2C</option>
+              </select>
+              {formik.touched.clientType && formik.errors.clientType && (
+                <p className="mt-1 text-xs text-rose-600">{formik.errors.clientType}</p>
+              )}
+            </div>
+
+            {/* Asignado a (obligatorio, inicia vacío) */}
+            <div className="md:col-span-1">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Asignado a</label>
+              <select
+                id="clientOwner"
+                name="clientOwner"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600 text-sm bg-white"
+                value={formik.values.clientOwner}
+                onChange={(e) => formik.setFieldValue('clientOwner', e.target.value)}
+                onBlur={formik.handleBlur}
+              >
+                <option value="">{'— Selecciona —'}</option>
+                <option value="rucapellan">Rucapellan</option>
+                <option value="cecil">Cecil</option>
+              </select>
+              {formik.touched.clientOwner && formik.errors.clientOwner && (
+                <p className="mt-1 text-xs text-rose-600">{formik.errors.clientOwner}</p>
+              )}
+            </div>
+
+            {/* Opcionales */}
             <InputField
               formik={formik}
               id="rut"
@@ -220,7 +242,7 @@ const NewClient = () => {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed active:scale-95 transition"
+              className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-brand-700 disabled:opacity-60 disabled:cursor-not-allowed active:scale-95 transition"
               title="Crear cliente"
             >
               <UserPlus size={16} />

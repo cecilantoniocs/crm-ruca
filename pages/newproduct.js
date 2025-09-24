@@ -11,7 +11,7 @@ import { ArrowLeft, PackagePlus, Image as ImageIcon, Trash2 } from 'lucide-react
 function InputField({ formik, id, label, type = 'text', ...rest }) {
   return (
     <div className="mb-4">
-      <label htmlFor={id} className="block text-sm font-medium text-gray-700 mb-1">
+      <label htmlFor={id} className="block text-sm font-medium text-coffee mb-1">
         {label}
       </label>
       <input
@@ -19,7 +19,7 @@ function InputField({ formik, id, label, type = 'text', ...rest }) {
         name={id}
         type={type}
         placeholder={label}
-        className="w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm"
+        className="w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm"
         onChange={formik.handleChange}
         onBlur={formik.handleBlur}
         value={formik.values[id]}
@@ -51,9 +51,9 @@ const NewProduct = () => {
       category: Yup.string().required('La categoría es obligatoria'),
       sku: Yup.string().required('El SKU es obligatorio'),
       cost: Yup.number()
-        .typeError('Ingresa un número válido')
-        .required('El costo es obligatorio')
-        .min(0, 'No puede ser negativo'),
+        .typeError('Debe ser número')
+        .integer('Debe ser entero')
+        .nullable(),
       weight: Yup.string().required('El peso es obligatorio'),
     }),
     onSubmit: async (values) => {
@@ -112,14 +112,14 @@ const NewProduct = () => {
     <Layout>
       {/* Header moderno con botón Atrás a la derecha */}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 tracking-tight">
-          Nuevo <span className="text-indigo-600">Producto</span>
+        <h1 className="text-2xl sm:text-3xl font-bold text-coffee tracking-tight">
+          Nuevo <span className="text-brand-600">Producto</span>
         </h1>
 
         <button
           type="button"
           onClick={() => router.back()}
-          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 active:scale-95 transition"
+          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-coffee hover:bg-gray-50 active:scale-95 transition"
           title="Atrás"
           aria-label="Atrás"
         >
@@ -154,12 +154,12 @@ const NewProduct = () => {
 
             {/* Fotografía con botones dinámicos */}
             <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Fotografía</label>
+              <label className="block text-sm font-medium text-coffee mb-2">Fotografía</label>
 
               <div className="flex items-center gap-3">
                 <label
                   htmlFor="file-upload"
-                  className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-indigo-700 cursor-pointer active:scale-95 transition"
+                  className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-brand-700 cursor-pointer active:scale-95 transition"
                 >
                   <ImageIcon size={16} />
                   {imageUrl ? 'Cambiar imagen' : 'Seleccionar imagen'}
@@ -201,14 +201,14 @@ const NewProduct = () => {
             <button
               type="button"
               onClick={() => router.push('/products')}
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 active:scale-95 transition"
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-coffee hover:bg-gray-50 active:scale-95 transition"
               title="Cancelar"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed active:scale-95 transition"
+              className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-brand-700 disabled:opacity-60 disabled:cursor-not-allowed active:scale-95 transition"
               disabled={isSubmitting}
               title="Crear producto"
             >

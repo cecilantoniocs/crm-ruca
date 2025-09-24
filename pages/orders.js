@@ -1,3 +1,4 @@
+// pages/orders.js
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Layout from '../components/Layout';
 import { useRouter } from 'next/router';
@@ -10,10 +11,9 @@ import {
   MoreVertical,
   Trash2,
   Pencil,
+  User,
 } from 'lucide-react';
 import { getCurrentSeller, getClients } from '../helpers';
-import { getCurrentUser, can } from '../helpers/permissions';
-const currentUser = getCurrentUser();
 
 // --- helpers ---
 const statusToString = (val) => {
@@ -34,7 +34,7 @@ const StatusBadge = ({ value }) => {
     entregado: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
     cancelado: 'bg-rose-50 text-rose-700 ring-rose-200',
   };
-  const cls = styleMap[v] || 'bg-gray-50 text-gray-700 ring-gray-200';
+  const cls = styleMap[v] || 'bg-gray-50 text-coffee ring-gray-200';
   const label = labelMap[v] || (typeof value === 'string' ? value : '—');
   return (
     <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${cls}`}>
@@ -54,7 +54,7 @@ const PaymentBadge = ({ value }) => {
   const label = v === 'transferencia' ? 'Transferencia' : 'Efectivo';
   const cls =
     v === 'transferencia'
-      ? 'bg-indigo-50 text-indigo-700 ring-indigo-200'
+      ? 'bg-brand-50 text-brand-700 ring-brand-200'
       : 'bg-sky-50 text-sky-700 ring-sky-200';
   return (
     <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${cls}`}>
@@ -67,22 +67,24 @@ export default function Orders() {
   const router = useRouter();
   const [orders, setOrders] = useState([]);
   const [clients, setClients] = useState([]); // para dirección
+  const [couriers, setCouriers] = useState([]); // usuarios que pueden repartir
   const [searchTerm, setSearchTerm] = useState('');
   const [debounced, setDebounced] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
-  // NUEVO: filtro por estado (todos/pendiente/entregado)
+  // filtro por estado
   const [statusFilter, setStatusFilter] = useState('todos');
 
   // Menús desktop
-  const [openMenuId, setOpenMenuId] = useState(null);      // ⋯ acciones
-  const [openStatusId, setOpenStatusId] = useState(null);  // cambiar estado
+  const [openMenuId, setOpenMenuId] = useState(null);       // ⋯ acciones
+  const [openStatusId, setOpenStatusId] = useState(null);   // cambiar estado
   const [openPaymentId, setOpenPaymentId] = useState(null); // cambiar pago
+  const [openCourierId, setOpenCourierId] = useState(null); // cambiar repartidor
 
   // Swipe mobile
-  const touchStart = useRef({}); // { [orderId]: {x,y} }
-  const [swipeX, setSwipeX] = useState({}); // { [orderId]: dx }
+  const touchStart = useRef({});
+  const [swipeX, setSwipeX] = useState({});
 
   // debounce buscador
   useEffect(() => {
@@ -96,12 +98,13 @@ export default function Orders() {
       setOpenMenuId(null);
       setOpenStatusId(null);
       setOpenPaymentId(null);
+      setOpenCourierId(null);
     };
     window.addEventListener('click', close);
     return () => window.removeEventListener('click', close);
   }, []);
 
-  // cargar pedidos + clientes
+  // cargar pedidos + clientes + couriers
   useEffect(() => {
     (async () => {
       try {
@@ -120,6 +123,9 @@ export default function Orders() {
         } else {
           setClients([]);
         }
+
+        const resU = await axiosClient.get('users'); // /api/users
+        setCouriers((resU?.data ?? []).filter((u) => !!u.canDeliver));
       } catch (e) {
         console.error(e);
         setLoadError('Error al cargar pedidos o clientes.');
@@ -135,6 +141,13 @@ export default function Orders() {
     for (const c of clients) m.set(c.id, c);
     return m;
   }, [clients]);
+
+  // mapa de courier id -> nombre
+  const courierName = useMemo(() => {
+    const m = new Map();
+    for (const u of couriers) m.set(u.id, u.name || u.email || 'Usuario');
+    return (id) => (id ? m.get(id) || '—' : '—');
+  }, [couriers]);
 
   const CLP = useMemo(() => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }), []);
   const fmtDate = (iso) => {
@@ -158,12 +171,14 @@ export default function Orders() {
       const status = statusToString(o.status);
       const address = (clientMap.get(o.clientId)?.dir1 || '').toLowerCase();
       const pay = paymentToString(o.paymentMethod);
+      const courier = courierName(o.deliveredBy).toLowerCase();
       return (
         client.includes(debounced) ||
         local.includes(debounced) ||
         status.includes(debounced) ||
         address.includes(debounced) ||
-        pay.includes(debounced)
+        pay.includes(debounced) ||
+        courier.includes(debounced)
       );
     };
 
@@ -173,11 +188,14 @@ export default function Orders() {
     };
 
     return orders.filter((o) => bySearch(o) && byStatus(o));
-  }, [orders, debounced, clientMap, statusFilter]);
+  }, [orders, debounced, clientMap, statusFilter, courierName]);
 
   const stop = (e) => e.stopPropagation();
 
   // --- acciones ---
+  const applyLocal = (id, patch) =>
+    setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, ...patch } : o)));
+
   const handleDelete = async (id) => {
     const ok = window.confirm('¿Eliminar este pedido? Esta acción no se puede deshacer.');
     if (!ok) return;
@@ -192,12 +210,6 @@ export default function Orders() {
 
   const handleEdit = (id) =>
     router.push({ pathname: '/editorder/[id]', query: { id } });
-
-
-
-
-  const applyLocal = (id, patch) =>
-    setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, ...patch } : o)));
 
   const updateStatus = async (id, newStatus) => {
     const prev = orders.find((o) => o.id === id);
@@ -221,77 +233,73 @@ export default function Orders() {
     } catch (e) {
       console.error(e);
       applyLocal(id, { paymentMethod: prev.paymentMethod });
-      alert('No se pudo actualizar el método de pago.');
     }
   };
 
-  // swipe handlers (mobile) con animación + fixes
+  const updateCourier = async (id, deliveredBy) => {
+    const prev = orders.find((o) => o.id === id);
+    if (!prev) return;
+    applyLocal(id, { deliveredBy });
+    try {
+      await axiosClient.patch(`orders/${id}`, { deliveredBy: deliveredBy || null });
+    } catch (e) {
+      console.error(e);
+      applyLocal(id, { deliveredBy: prev.deliveredBy || null });
+      alert('No se pudo actualizar el repartidor.');
+    }
+  };
+
+  // swipe handlers (mobile)
   const onTouchStart = (id) => (e) => {
     const t = e.changedTouches?.[0];
     if (!t) return;
     touchStart.current[id] = { x: t.clientX, y: t.clientY };
     setSwipeX((s) => ({ ...s, [id]: 0 }));
   };
-
   const onTouchMove = (id) => (e) => {
     const start = touchStart.current[id];
     const t = e.changedTouches?.[0];
     if (!start || !t) return;
     const dx = t.clientX - start.x;
     const dy = t.clientY - start.y;
-
-    // si es mayormente horizontal, evitamos el scroll del navegador
-    if (Math.abs(dx) > Math.abs(dy)) {
-      e.preventDefault?.();
-    }
-
+    if (Math.abs(dx) > Math.abs(dy)) e.preventDefault?.();
     if (Math.abs(dy) > 40) return;
-
     const clamped = Math.max(-120, Math.min(120, dx));
     setSwipeX((s) => ({ ...s, [id]: clamped }));
   };
-
   const onTouchEnd = (id) => (e) => {
     const start = touchStart.current[id];
     const t = e.changedTouches?.[0];
     if (!start || !t) return;
     const dx = t.clientX - start.x;
     const dy = t.clientY - start.y;
-
     const THRESH = 64;
     if (Math.abs(dx) > THRESH && Math.abs(dy) < 40) {
-      if (dx < 0) {
-        // swipe left -> entregado
-        updateStatus(id, 'entregado');
-      } else {
-        // swipe right -> pendiente
-        updateStatus(id, 'pendiente');
-      }
+      if (dx < 0) updateStatus(id, 'entregado');
+      else updateStatus(id, 'pendiente');
     }
-
     setSwipeX((s) => ({ ...s, [id]: 0 }));
     delete touchStart.current[id];
   };
 
-  // estilos del segment control
   const pillClass = (val) =>
     `px-3 py-1.5 text-xs sm:text-sm rounded-md font-medium transition ${
       statusFilter === val
-        ? 'bg-white text-indigo-600 shadow'
-        : 'text-gray-600 hover:text-gray-900'
+        ? 'bg-white text-brand-600 shadow'
+        : 'text-gray-600 hover:text-coffee'
     }`;
 
   return (
     <Layout>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
-        <h1 className="text-3xl font-bold text-gray-800 tracking-tight">
-          Gestión de <span className="text-indigo-600">Pedidos</span>
+        <h1 className="text-3xl font-bold text-coffee tracking-tight">
+          Gestión de <span className="text-brand-600">Pedidos</span>
         </h1>
 
         <button
           onClick={() => router.push('/neworder')}
-          className="mt-3 sm:mt-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium shadow hover:bg-indigo-700 active:scale-95 transition"
+          className="mt-3 sm:mt-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-600 text-white font-medium shadow hover:bg-brand-700 active:scale-95 transition"
         >
           <PackagePlus size={18} />
           Nuevo Pedido
@@ -300,45 +308,22 @@ export default function Orders() {
 
       {/* Buscador + Filtro estado */}
       <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:gap-4">
-        {/* buscador */}
         <div className="relative flex-1 max-w-full">
           <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
           <input
             type="text"
-            placeholder="Buscar por cliente, local, dirección, estado o pago…"
-            className="pl-10 pr-4 py-2 w-full rounded-lg border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm"
+            placeholder="Buscar por cliente, local, dirección, estado, pago o repartidor…"
+            className="pl-10 pr-4 py-2 w-full rounded-lg border border-gray-300 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
 
-        {/* filtro segmentado */}
         <div className="mt-3 sm:mt-0">
           <div className="inline-flex rounded-lg bg-gray-100 p-1 shadow-inner">
-            <button
-              type="button"
-              className={pillClass('todos')}
-              onClick={() => setStatusFilter('todos')}
-              aria-pressed={statusFilter === 'todos'}
-            >
-              Todos
-            </button>
-            <button
-              type="button"
-              className={pillClass('pendiente')}
-              onClick={() => setStatusFilter('pendiente')}
-              aria-pressed={statusFilter === 'pendiente'}
-            >
-              Pendiente
-            </button>
-            <button
-              type="button"
-              className={pillClass('entregado')}
-              onClick={() => setStatusFilter('entregado')}
-              aria-pressed={statusFilter === 'entregado'}
-            >
-              Entregado
-            </button>
+            <button type="button" className={pillClass('todos')} onClick={() => setStatusFilter('todos')}>Todos</button>
+            <button type="button" className={pillClass('pendiente')} onClick={() => setStatusFilter('pendiente')}>Pendiente</button>
+            <button type="button" className={pillClass('entregado')} onClick={() => setStatusFilter('entregado')}>Entregado</button>
           </div>
         </div>
       </div>
@@ -349,7 +334,7 @@ export default function Orders() {
         <p className="text-gray-600">No hay pedidos que coincidan con la búsqueda.</p>
       )}
 
-      {/* MOBILE: Cards (detalle SIEMPRE + lápiz + swipe + toggle pago) */}
+      {/* MOBILE: Cards */}
       {!loading && !loadError && filtered.length > 0 && (
         <div className="sm:hidden space-y-3 overflow-x-hidden">
           {filtered.map((o) => {
@@ -370,16 +355,13 @@ export default function Orders() {
                 onTouchMove={onTouchMove(o.id)}
                 onTouchEnd={onTouchEnd(o.id)}
                 onTouchCancel={() => setSwipeX((s) => ({ ...s, [o.id]: 0 }))}
-                style={{
-                  transform: `translate3d(${dx}px, 0, 0)`,
-                  transition: 'transform 180ms ease',
-                }}
+                style={{ transform: `translate3d(${dx}px, 0, 0)`, transition: 'transform 180ms ease' }}
               >
                 {/* lápiz editar */}
                 <button
                   type="button"
                   onClick={() => handleEdit(o.id)}
-                  className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-indigo-500 text-white hover:bg-indigo-600 active:scale-95 transition"
+                  className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-500 text-white hover:bg-brand-600 active:scale-95 transition"
                   aria-label="Editar pedido"
                   title="Editar pedido"
                 >
@@ -388,14 +370,14 @@ export default function Orders() {
 
                 {/* Cliente / Local */}
                 <div className="pr-10">
-                  <h3 className="text-base font-semibold text-gray-900">{o.clientName || '—'}</h3>
+                  <h3 className="text-base font-semibold text-coffee">{o.clientName || '—'}</h3>
                   <p className="text-sm text-gray-600">{o.clientLocal || '—'}</p>
                 </div>
 
                 {/* Dirección + GPS */}
                 <div className="mt-2 flex items-center justify-between">
-                  <p className="text-sm text-gray-700">
-                    <span className="font-medium text-gray-900">Dirección: </span>
+                  <p className="text-sm text-coffee">
+                    <span className="font-medium text-coffee">Dirección: </span>
                     {addr || '—'}
                   </p>
                   {addr && (
@@ -404,7 +386,7 @@ export default function Orders() {
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={stop}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-50 text-brand-600 hover:bg-brand-100 border border-brand-200"
                       title="Abrir en Google Maps"
                       aria-label="Abrir en Google Maps"
                     >
@@ -415,7 +397,7 @@ export default function Orders() {
 
                 {/* Meta */}
                 <div className="mt-3 grid grid-cols-2 gap-2">
-                  <div className="text-sm text-gray-700 flex items-center gap-2">
+                  <div className="text-sm text-coffee flex items-center gap-2">
                     <Calendar size={16} className="text-gray-400" />
                     <span>{fmtDate(o.deliveryDate)}</span>
                   </div>
@@ -424,16 +406,31 @@ export default function Orders() {
                   </div>
                 </div>
 
-                {/* Ítems (detalle SIEMPRE) */}
+                {/* Repartidor (selector simple en móvil) */}
+                <div className="mt-2">
+                  <label className="block text-xs text-gray-600 mb-1">Repartidor</label>
+                  <select
+                    value={o.deliveredBy || ''}
+                    onChange={(e) => updateCourier(o.id, e.target.value || null)}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600"
+                  >
+                    <option value="">— Sin asignar —</option>
+                    {couriers.map((u) => (
+                      <option key={u.id} value={u.id}>{u.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Ítems */}
                 <div className="mt-3 rounded-lg border border-gray-200 p-3 bg-gray-50">
                   <ul className="space-y-1 text-sm">
                     {items.length === 0 && <li className="text-gray-500">Sin productos</li>}
                     {items.map((it, i) => (
                       <li key={i} className="flex items-center justify-between">
-                        <span className="text-gray-700">
+                        <span className="text-coffee">
                           {it.name || 'Producto'} × {it.qty}
                         </span>
-                        <span className="text-gray-900 font-medium">
+                        <span className="text-coffee font-medium">
                           {CLP.format(Number(it.subtotal) || (Number(it.qty) * Number(it.price) || 0))}
                         </span>
                       </li>
@@ -441,7 +438,7 @@ export default function Orders() {
                   </ul>
                 </div>
 
-                {/* Pago (toggle) + Total */}
+                {/* Pago + Total */}
                 <div className="mt-3 flex items-center justify-between">
                   <button
                     type="button"
@@ -454,7 +451,7 @@ export default function Orders() {
                     <PaymentBadge value={o.paymentMethod} />
                   </button>
 
-                  <div className="text-right text-base font-semibold text-gray-900">
+                  <div className="text-right text-base font-semibold text-coffee">
                     {CLP.format(Number(o.total) || 0)}
                   </div>
                 </div>
@@ -464,12 +461,12 @@ export default function Orders() {
         </div>
       )}
 
-      {/* DESKTOP: Tabla con detalle SIEMPRE + estado editable + pago editable + ⋯ */}
+      {/* DESKTOP: Tabla */}
       {!loading && !loadError && filtered.length > 0 && (
         <div className="hidden sm:block">
           <div className="rounded-xl border border-gray-200 shadow-sm">
             <div className="overflow-x-auto">
-              <table className="min-w-[1100px] w-full">
+              <table className="min-w-[1200px] w-full">
                 <thead className="bg-gray-50">
                   <tr className="text-left">
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Cliente</th>
@@ -478,226 +475,227 @@ export default function Orders() {
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Entrega</th>
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Estado</th>
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Pago</th>
+                    <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Repartidor</th>
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-center">Ítems</th>
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-right">Total</th>
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-center">Acciones</th>
                   </tr>
                 </thead>
 
-              <tbody className="divide-y divide-gray-200">
-                {filtered.map((o, idx) => {
-                  const c = clientMap.get(o.clientId);
-                  const addr = c?.dir1 || '';
-                  const items = o.items ?? [];
-                  const statusStr = statusToString(o.status);
+                <tbody className="divide-y divide-gray-200">
+                  {filtered.map((o, idx) => {
+                    const c = clientMap.get(o.clientId);
+                    const addr = c?.dir1 || '';
+                    const items = o.items ?? [];
 
-                  return (
-                    <React.Fragment key={o.id}>
-                      <tr className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-colors`}>
-                        <td className="px-6 py-3 text-sm text-gray-900">{o.clientName || '—'}</td>
-                        <td className="px-6 py-3 text-sm text-gray-700">{o.clientLocal || '—'}</td>
+                    return (
+                      <React.Fragment key={o.id}>
+                        <tr className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-colors`}>
+                          <td className="px-6 py-3 text-sm text-coffee">{o.clientName || '—'}</td>
+                          <td className="px-6 py-3 text-sm text-coffee">{o.clientLocal || '—'}</td>
 
-                        {/* Dirección + GPS */}
-                        <td className="px-6 py-3 text-sm text-gray-700">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="truncate">{addr || '—'}</span>
-                            {addr && (
-                              <a
-                                href={mapsUrl(addr)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={stop}
-                                className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-full bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-200"
-                                title="Abrir en Google Maps"
-                                aria-label="Abrir en Google Maps"
-                              >
-                                <Navigation size={16} />
-                              </a>
-                            )}
-                          </div>
-                        </td>
-
-                        <td className="px-6 py-3 text-sm text-gray-700">{fmtDate(o.deliveryDate)}</td>
-
-                        {/* Estado editable inline */}
-                        <td className="px-6 py-3 text-sm relative" onClick={stop}>
-                          <button
-                            type="button"
-                            className="inline-flex items-center gap-2"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setOpenStatusId((v) => (v === o.id ? null : o.id));
-                              setOpenPaymentId(null);
-                              setOpenMenuId(null);
-                            }}
-                            title="Cambiar estado"
-                          >
-                            <StatusBadge value={o.status} />
-                          </button>
-
-                          {openStatusId === o.id && (
-                            <div className="absolute left-0 mt-2 w-40 rounded-lg border border-gray-200 bg-white shadow-lg z-50">
-                              <button
-                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                                onClick={() => {
-                                  setOpenStatusId(null);
-                                  updateStatus(o.id, 'pendiente');
-                                }}
-                              >
-                                Pendiente
-                              </button>
-                              <button
-                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                                onClick={() => {
-                                  setOpenStatusId(null);
-                                  updateStatus(o.id, 'entregado');
-                                }}
-                              >
-                                Entregado
-                              </button>
+                          {/* Dirección + GPS */}
+                          <td className="px-6 py-3 text-sm text-coffee">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="truncate">{addr || '—'}</span>
+                              {addr && (
+                                <a
+                                  href={mapsUrl(addr)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={stop}
+                                  className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-full bg-brand-50 text-brand-600 hover:bg-brand-100 border border-brand-200"
+                                  title="Abrir en Google Maps"
+                                  aria-label="Abrir en Google Maps"
+                                >
+                                  <Navigation size={16} />
+                                </a>
+                              )}
                             </div>
-                          )}
-                        </td>
+                          </td>
 
-                        {/* Pago editable inline */}
-                        <td className="px-6 py-3 text-sm relative" onClick={stop}>
-                          <button
-                            type="button"
-                            className="inline-flex items-center gap-2"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setOpenPaymentId((v) => (v === o.id ? null : o.id));
-                              setOpenStatusId(null);
-                              setOpenMenuId(null);
-                            }}
-                            title="Cambiar método de pago"
-                          >
-                            <PaymentBadge value={o.paymentMethod} />
-                          </button>
+                          <td className="px-6 py-3 text-sm text-coffee">{fmtDate(o.deliveryDate)}</td>
 
-                          {openPaymentId === o.id && (
-                            <div className="absolute left-0 mt-2 w-44 rounded-lg border border-gray-200 bg-white shadow-lg z-50">
-                              <button
-                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                                onClick={() => {
-                                  setOpenPaymentId(null);
-                                  updatePayment(o.id, 'efectivo');
-                                }}
-                              >
-                                Efectivo
-                              </button>
-                              <button
-                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                                onClick={() => {
-                                  setOpenPaymentId(null);
-                                  updatePayment(o.id, 'transferencia');
-                                }}
-                              >
-                                Transferencia
-                              </button>
-                            </div>
-                          )}
-                        </td>
-
-                        <td className="px-6 py-3 text-sm text-center">{items.length}</td>
-                        <td className="px-6 py-3 text-sm text-right font-medium text-gray-900">
-                          {CLP.format(Number(o.total) || 0)}
-                        </td>
-
-                        {/* Acciones ⋯ */}
-                        <td className="px-6 py-3 text-sm">
-                          <div className="relative flex items-center justify-center" onClick={stop}>
+                          {/* Estado editable */}
+                          <td className="px-6 py-3 text-sm relative" onClick={stop}>
                             <button
                               type="button"
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 active:scale-95 transition text-gray-600"
+                              className="inline-flex items-center gap-2"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setOpenMenuId((v) => (v === o.id ? null : o.id));
-                                setOpenStatusId(null);
+                                setOpenStatusId((v) => (v === o.id ? null : o.id));
                                 setOpenPaymentId(null);
+                                setOpenMenuId(null);
+                                setOpenCourierId(null);
                               }}
-                              aria-label="Más opciones"
-                              title="Más opciones"
+                              title="Cambiar estado"
                             >
-                              <MoreVertical size={16} />
+                              <StatusBadge value={o.status} />
                             </button>
 
-                            {openMenuId === o.id && (
-                              <div className="absolute right-0 top-9 w-40 rounded-lg border border-gray-200 bg-white shadow-lg z-50">
-                                <button
-                                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                                  onClick={() => {
-                                    setOpenMenuId(null);
-                                    handleEdit(o.id);
-                                  }}
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <Pencil size={14} />
-                                    <span>Editar</span>
-                                  </div>
-                                </button>
-                                <button
-                                  className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
-                                  onClick={() => {
-                                    setOpenMenuId(null);
-                                    handleDelete(o.id);
-                                  }}
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <Trash2 size={14} />
-                                    <span>Eliminar</span>
-                                  </div>
-                                </button>
+                            {openStatusId === o.id && (
+                              <div className="absolute left-0 mt-2 w-40 rounded-lg border border-gray-200 bg-white shadow-lg z-50">
+                                <button className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50" onClick={() => { setOpenStatusId(null); updateStatus(o.id, 'pendiente'); }}>Pendiente</button>
+                                <button className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50" onClick={() => { setOpenStatusId(null); updateStatus(o.id, 'entregado'); }}>Entregado</button>
                               </div>
                             )}
-                          </div>
-                        </td>
-                      </tr>
+                          </td>
 
-                      {/* Detalle SIEMPRE */}
-                      <tr className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
-                        <td colSpan={9} className="px-6 pb-4">
-                          <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 p-4">
-                            <h4 className="text-sm font-semibold text-gray-800 mb-2">Detalle de productos</h4>
-                            <div className="overflow-x-auto">
-                              <table className="min-w-full">
-                                <thead>
-                                  <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
-                                    <th className="py-1 pr-4">Producto</th>
-                                    <th className="py-1 pr-4">Cantidad</th>
-                                    <th className="py-1 pr-4 text-right">Precio</th>
-                                    <th className="py-1 pr-0 text-right">Subtotal</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="text-sm text-gray-700">
-                                  {(o.items ?? []).length === 0 && (
-                                    <tr>
-                                      <td colSpan={4} className="py-2 text-gray-500">Sin productos</td>
-                                    </tr>
-                                  )}
-                                  {(o.items ?? []).map((it, i) => (
-                                    <tr key={i} className="border-t border-gray-200">
-                                      <td className="py-1 pr-4">{it.name || 'Producto'}</td>
-                                      <td className="py-1 pr-4">{it.qty}</td>
-                                      <td className="py-1 pr-4 text-right">{CLP.format(Number(it.price) || 0)}</td>
-                                      <td className="py-1 pr-0 text-right">
-                                        {CLP.format(Number(it.subtotal) || (Number(it.qty) * Number(it.price) || 0))}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
+                          {/* Pago editable */}
+                          <td className="px-6 py-3 text-sm relative" onClick={stop}>
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-2"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenPaymentId((v) => (v === o.id ? null : o.id));
+                                setOpenStatusId(null);
+                                setOpenMenuId(null);
+                                setOpenCourierId(null);
+                              }}
+                              title="Cambiar método de pago"
+                            >
+                              <PaymentBadge value={o.paymentMethod} />
+                            </button>
+
+                            {openPaymentId === o.id && (
+                              <div className="absolute left-0 mt-2 w-44 rounded-lg border border-gray-200 bg-white shadow-lg z-50">
+                                <button className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50" onClick={() => { setOpenPaymentId(null); updatePayment(o.id, 'efectivo'); }}>Efectivo</button>
+                                <button className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50" onClick={() => { setOpenPaymentId(null); updatePayment(o.id, 'transferencia'); }}>Transferencia</button>
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Repartidor editable */}
+                          <td className="px-6 py-3 text-sm relative" onClick={stop}>
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-2 text-coffee"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenCourierId((v) => (v === o.id ? null : o.id));
+                                setOpenStatusId(null);
+                                setOpenPaymentId(null);
+                                setOpenMenuId(null);
+                              }}
+                              title="Cambiar repartidor"
+                            >
+                              <span className="inline-flex items-center gap-1">
+                                <User size={14} className="text-gray-400" />
+                                {courierName(o.deliveredBy)}
+                              </span>
+                            </button>
+
+                            {openCourierId === o.id && (
+                              <div className="absolute left-0 mt-2 w-56 rounded-lg border border-gray-200 bg-white shadow-lg z-50 p-2">
+                                <button
+                                  className="w-full text-left px-2 py-1.5 text-sm hover:bg-gray-50 rounded"
+                                  onClick={() => { setOpenCourierId(null); updateCourier(o.id, null); }}
+                                >
+                                  — Sin asignar —
+                                </button>
+                                {couriers.map((u) => (
+                                  <button
+                                    key={u.id}
+                                    className="w-full text-left px-2 py-1.5 text-sm hover:bg-gray-50 rounded"
+                                    onClick={() => { setOpenCourierId(null); updateCourier(o.id, u.id); }}
+                                  >
+                                    {u.name} {u.role ? <span className="text-gray-400">({u.role})</span> : null}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+
+                          <td className="px-6 py-3 text-sm text-center">{items.length}</td>
+                          <td className="px-6 py-3 text-sm text-right font-medium text-coffee">
+                            {CLP.format(Number(o.total) || 0)}
+                          </td>
+
+                          {/* Acciones ⋯ */}
+                          <td className="px-6 py-3 text-sm">
+                            <div className="relative flex items-center justify-center" onClick={stop}>
+                              <button
+                                type="button"
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 active:scale-95 transition text-gray-600"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenMenuId((v) => (v === o.id ? null : o.id));
+                                  setOpenStatusId(null);
+                                  setOpenPaymentId(null);
+                                  setOpenCourierId(null);
+                                }}
+                                aria-label="Más opciones"
+                                title="Más opciones"
+                              >
+                                <MoreVertical size={16} />
+                              </button>
+
+                              {openMenuId === o.id && (
+                                <div className="absolute right-0 top-9 w-40 rounded-lg border border-gray-200 bg-white shadow-lg z-50">
+                                  <button className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50" onClick={() => { setOpenMenuId(null); handleEdit(o.id); }}>
+                                    <div className="flex items-center gap-2">
+                                      <Pencil size={14} />
+                                      <span>Editar</span>
+                                    </div>
+                                  </button>
+                                  <button className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50" onClick={() => { setOpenMenuId(null); handleDelete(o.id); }}>
+                                    <div className="flex items-center gap-2">
+                                      <Trash2 size={14} />
+                                      <span>Eliminar</span>
+                                    </div>
+                                  </button>
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        </td>
-                      </tr>
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
+                          </td>
+                        </tr>
+
+                        {/* Detalle */}
+                        <tr className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                          <td colSpan={10} className="px-6 pb-4">
+                            <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                              <h4 className="text-sm font-semibold text-coffee mb-2">Detalle de productos</h4>
+                              <div className="overflow-x-auto">
+                                <table className="min-w-full">
+                                  <thead>
+                                    <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
+                                      <th className="py-1 pr-4">Producto</th>
+                                      <th className="py-1 pr-4">Cantidad</th>
+                                      <th className="py-1 pr-4 text-right">Precio</th>
+                                      <th className="py-1 pr-0 text-right">Subtotal</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="text-sm text-coffee">
+                                    {(items ?? []).length === 0 && (
+                                      <tr>
+                                        <td colSpan={4} className="py-2 text-gray-500">Sin productos</td>
+                                      </tr>
+                                    )}
+                                    {(items ?? []).map((it, i) => (
+                                      <tr key={i} className="border-t border-gray-200">
+                                        <td className="py-1 pr-4">{it.name || 'Producto'}</td>
+                                        <td className="py-1 pr-4">{it.qty}</td>
+                                        <td className="py-1 pr-4 text-right">{CLP.format(Number(it.price) || 0)}</td>
+                                        <td className="py-1 pr-0 text-right">
+                                          {CLP.format(Number(it.subtotal) || (Number(it.qty) * Number(it.price) || 0))}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div></div>
+        </div>
       )}
     </Layout>
   );

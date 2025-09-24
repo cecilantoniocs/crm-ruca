@@ -36,8 +36,8 @@ const Sidebar = ({ menuOpen = false, setMenuOpen }) => {
     [
       'group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition',
       isActive(path)
-        ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
-        : 'text-gray-700 hover:bg-gray-50',
+        ? 'bg-brand-50 text-brand-700 ring-1 ring-brand-200'
+        : 'text-coffee hover:bg-gray-50',
     ].join(' ');
 
   const closeMenu = () => {
@@ -70,7 +70,7 @@ const Sidebar = ({ menuOpen = false, setMenuOpen }) => {
       >
         {/* Header + cerrar (móvil) */}
         <div className="flex items-center justify-between mb-4">
-          <p className="text-2xl font-black tracking-tight text-gray-800">RUCAPELLAN</p>
+          <p className="text-2xl font-black tracking-tight text-coffee">RUCAPELLAN</p>
           <button
             className="sm:hidden inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-gray-100"
             onClick={closeMenu}

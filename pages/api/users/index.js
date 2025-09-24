@@ -5,6 +5,7 @@ export default async function handler(req, res) {
 
   try {
     const role = String(req.query.role || '').toLowerCase();
+    const canDeliverParam = String(req.query.canDeliver || '').toLowerCase();
 
     // Compat: si piden ?role=client, respondemos desde clients
     if (role === 'client' || role === 'cliente') {
@@ -14,7 +15,6 @@ export default async function handler(req, res) {
         .order('name', { ascending: true });
       if (error) throw error;
 
-      // formateo mínimo: muchos componentes solo querían dirección/owner
       const rows = (data || []).map(c => ({
         id: c.id,
         name: c.name,
@@ -32,8 +32,13 @@ export default async function handler(req, res) {
     // Usuarios de la app (admin/vendedor/repartidor)
     let q = supabaseServer
       .from('users_app')
-      .select('id,name,email,role,is_admin,partner_tag,permissions')
+      .select('id,name,email,role,is_admin,partner_tag,permissions,can_deliver')
       .order('name', { ascending: true });
+
+    if (role) q = q.eq('role', role);
+    if (canDeliverParam === '1' || canDeliverParam === 'true') {
+      q = q.eq('can_deliver', true);
+    }
 
     const { data, error } = await q;
     if (error) throw error;
@@ -46,6 +51,7 @@ export default async function handler(req, res) {
       isAdmin: u.is_admin,
       partnerTag: u.partner_tag || '',
       permissions: u.permissions || [],
+      canDeliver: !!u.can_deliver,
       sellerId: u.id,
     }));
 

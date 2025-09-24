@@ -31,9 +31,10 @@ export default function EditOrder() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  // datos auxiliares
+  // catálogos
   const [clients, setClients] = useState([]);
   const [products, setProducts] = useState([]);
+  const [couriers, setCouriers] = useState([]);
 
   // form state
   const [orderId, setOrderId] = useState('');
@@ -44,7 +45,8 @@ export default function EditOrder() {
   const [status, setStatus] = useState('pendiente');
   const [paymentMethod, setPaymentMethod] = useState('efectivo');
   const [invoice, setInvoice] = useState(false);
-  const [items, setItems] = useState([]); // [{productId, name, qty, price}]
+  const [deliveredBy, setDeliveredBy] = useState(''); // repartidor
+  const [items, setItems] = useState([]);
 
   // para agregar ítem
   const [newProd, setNewProd] = useState(null);
@@ -59,11 +61,14 @@ export default function EditOrder() {
         setLoading(true);
         setLoadError('');
 
-        const [{ data: order }, { data: productsList }] = await Promise.all([
+        const [{ data: order }, { data: productsList }, usersRes] = await Promise.all([
           axiosClient.get(`orders/${id}`),
           axiosClient.get('products'),
+          axiosClient.get('users'),
         ]);
+
         setProducts(productsList ?? []);
+        setCouriers((usersRes?.data ?? []).filter((u) => !!u.canDeliver));
 
         const seller = getCurrentSeller?.();
         if (seller?.id) {
@@ -82,6 +87,7 @@ export default function EditOrder() {
         setStatus(statusToString(order.status) || 'pendiente');
         setPaymentMethod(paymentToString(order.paymentMethod));
         setInvoice(Boolean(order.invoice));
+        setDeliveredBy(order.deliveredBy || ''); // <- nuevo
         setItems(
           Array.isArray(order.items)
             ? order.items.map((it) => ({
@@ -162,9 +168,7 @@ export default function EditOrder() {
   const updateItem = (idx, patch) => {
     setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
   };
-  const removeItem = (idx) => {
-    setItems((prev) => prev.filter((_, i) => i !== idx));
-  };
+  const removeItem = (idx) => setItems((prev) => prev.filter((_, i) => i !== idx));
 
   const handleSave = async () => {
     if (!clientId) return Swal.fire('Falta cliente', 'Selecciona un cliente', 'warning');
@@ -179,6 +183,7 @@ export default function EditOrder() {
       status,
       paymentMethod,
       invoice,
+      deliveredBy: deliveredBy || null, // <- nuevo
       items: items.map((it) => ({
         productId: it.productId,
         name: it.name,
@@ -229,16 +234,16 @@ export default function EditOrder() {
 
   return (
     <Layout>
-      {/* Header con botón Atrás a la derecha */}
+      {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-800 tracking-tight">
-          Editar <span className="text-indigo-600">Pedido</span>
+        <h1 className="text-2xl font-bold text-coffee tracking-tight">
+          Editar <span className="text-brand-600">Pedido</span>
         </h1>
 
         <button
           type="button"
           onClick={() => router.back()}
-          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 active:scale-95 transition"
+          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-coffee hover:bg-gray-50 active:scale-95 transition"
           title="Volver"
           aria-label="Volver"
         >
@@ -255,7 +260,7 @@ export default function EditOrder() {
           <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
             {/* Cliente */}
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Cliente</label>
+              <label className="block text-sm font-medium text-coffee mb-1">Cliente</label>
               <Select
                 options={clientOptions}
                 placeholder="Buscar cliente…"
@@ -267,19 +272,19 @@ export default function EditOrder() {
             </div>
 
             {/* Datos principales */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Fecha entrega</label>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="md:col-span-1">
+                <label className="block text-sm font-medium text-coffee mb-1">Fecha entrega</label>
                 <input
                   type="date"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm"
                   value={deliveryDate}
                   onChange={(e) => setDeliveryDate(e.target.value)}
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Estado</label>
+              <div className="md:col-span-1">
+                <label className="block text-sm font-medium text-coffee mb-1">Estado</label>
                 <Select
                   options={statusOpts}
                   value={statusOpts.find((o) => o.value === status) || statusOpts[0]}
@@ -288,8 +293,8 @@ export default function EditOrder() {
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Método de pago</label>
+              <div className="md:col-span-1">
+                <label className="block text-sm font-medium text-coffee mb-1">Método de pago</label>
                 <Select
                   options={paymentOpts}
                   value={paymentOpts.find((o) => o.value === paymentMethod) || paymentOpts[0]}
@@ -297,14 +302,31 @@ export default function EditOrder() {
                   classNamePrefix="select"
                 />
               </div>
+
+              {/* Repartidor asignado */}
+              <div className="md:col-span-1">
+                <label className="block text-sm font-medium text-coffee mb-1">Repartidor asignado</label>
+                <select
+                  value={deliveredBy || ''}
+                  onChange={(e) => setDeliveredBy(e.target.value || '')}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600"
+                >
+                  <option value="">— Sin asignar —</option>
+                  {couriers.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} {u.role ? `(${u.role})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             {/* Factura */}
             <div className="mt-4">
-              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+              <label className="inline-flex items-center gap-2 text-sm text-coffee">
                 <input
                   type="checkbox"
-                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
                   checked={invoice}
                   onChange={(e) => setInvoice(e.target.checked)}
                 />
@@ -314,12 +336,12 @@ export default function EditOrder() {
 
             {/* Ítems */}
             <div className="mt-6">
-              <h3 className="text-sm font-semibold text-gray-800 mb-3">Productos del pedido</h3>
+              <h3 className="text-sm font-semibold text-coffee mb-3">Productos del pedido</h3>
 
               {/* Agregar item */}
               <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end mb-4">
                 <div className="md:col-span-3">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Producto</label>
+                  <label className="block text-sm font-medium text-coffee mb-1">Producto</label>
                   <Select
                     options={productOptions}
                     placeholder="Buscar producto…"
@@ -330,22 +352,22 @@ export default function EditOrder() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Cantidad</label>
+                  <label className="block text-sm font-medium text-coffee mb-1">Cantidad</label>
                   <input
                     type="number"
                     min="1"
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm"
                     value={newQty}
                     onChange={(e) => setNewQty(e.target.value)}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Precio</label>
+                  <label className="block text-sm font-medium text-coffee mb-1">Precio</label>
                   <input
                     type="number"
                     step="0.01"
                     min="0"
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm"
                     value={newPrice}
                     onChange={(e) => setNewPrice(e.target.value)}
                     placeholder="0"
@@ -355,7 +377,7 @@ export default function EditOrder() {
                   <button
                     type="button"
                     onClick={addItem}
-                    className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow hover:bg-indigo-700 active:scale-95 transition"
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white shadow hover:bg-brand-700 active:scale-95 transition"
                   >
                     <Plus size={16} />
                     Añadir
@@ -363,16 +385,14 @@ export default function EditOrder() {
                 </div>
               </div>
 
-              {/* Tabla de items (más compacta en móvil) */}
+              {/* Tabla de items */}
               <div className="rounded-lg border border-gray-200 overflow-x-auto">
                 <table className="min-w-full table-fixed md:table-auto">
                   <thead className="bg-gray-50">
                     <tr className="text-left text-[11px] sm:text-xs uppercase tracking-wide text-gray-600">
                       <th className="px-2 py-1 sm:px-4 sm:py-2 w-1/2 md:w-auto">Producto</th>
                       <th className="px-2 py-1 sm:px-4 sm:py-2 w-12 md:w-auto">Cant.</th>
-                      {/* Móvil: encabezado 'Precio' a la izquierda; Desktop: a la derecha */}
                       <th className="px-1 py-1 sm:px-4 sm:py-2 w-16 md:w-auto text-left md:text-right">Precio</th>
-                      {/* Menor separación entre Precio y Subtotal en móvil */}
                       <th className="pl-1 pr-2 py-1 sm:px-4 sm:py-2 w-20 md:w-auto text-right">Subtotal</th>
                       <th className="px-2 py-1 sm:px-4 sm:py-2 w-12 md:w-auto text-center">Quitar</th>
                     </tr>
@@ -380,9 +400,7 @@ export default function EditOrder() {
                   <tbody className="divide-y divide-gray-200 text-xs sm:text-sm">
                     {items.length === 0 && (
                       <tr>
-                        <td colSpan={5} className="px-4 py-3 text-gray-500">
-                          Sin productos
-                        </td>
+                        <td colSpan={5} className="px-4 py-3 text-gray-500">Sin productos</td>
                       </tr>
                     )}
                     {items.map((it, idx) => {
@@ -390,39 +408,29 @@ export default function EditOrder() {
                       return (
                         <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                           <td className="px-2 py-1 sm:px-4 sm:py-2">
-                            <span className="block truncate max-w-[11rem] sm:max-w-none">
-                              {it.name || 'Producto'}
-                            </span>
+                            <span className="block truncate max-w-[11rem] sm:max-w-none">{it.name || 'Producto'}</span>
                           </td>
                           <td className="px-2 py-1 sm:px-4 sm:py-2">
                             <input
                               type="number"
                               min="1"
-                              className="w-14 sm:w-24 rounded-lg border border-gray-300 px-2 py-1 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-xs sm:text-sm"
+                              className="w-14 sm:w-24 rounded-lg border border-gray-300 px-2 py-1 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-xs sm:text-sm"
                               value={it.qty}
-                              onChange={(e) =>
-                                updateItem(idx, { qty: Number(e.target.value) || 0 })
-                              }
+                              onChange={(e) => updateItem(idx, { qty: Number(e.target.value) || 0 })}
                             />
                           </td>
-                          {/* Móvil: input más angosto y menos padding a la derecha */}
                           <td className="px-1 py-1 sm:px-4 sm:py-2 text-right">
                             <input
                               type="number"
                               step="0.01"
                               min="0"
-                              className="w-16 sm:w-28 text-right rounded-lg border border-gray-300 px-2 py-1 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-xs sm:text-sm"
+                              className="w-16 sm:w-28 text-right rounded-lg border border-gray-300 px-2 py-1 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-xs sm:text-sm"
                               value={it.price}
-                              onChange={(e) =>
-                                updateItem(idx, { price: Number(e.target.value) || 0 })
-                              }
+                              onChange={(e) => updateItem(idx, { price: Number(e.target.value) || 0 })}
                             />
                           </td>
-                          {/* Móvil: menos espacio izquierdo y ancho fijo pequeño */}
-                          <td className="pl-1 pr-2 py-1 sm:px-4 sm:py-2 text-right font-medium text-gray-900">
-                            <span className="inline-block w-20 sm:w-auto text-right">
-                              {CLP.format(subtotal)}
-                            </span>
+                          <td className="pl-1 pr-2 py-1 sm:px-4 sm:py-2 text-right font-medium text-coffee">
+                            <span className="inline-block w-20 sm:w-auto text-right">{CLP.format(subtotal)}</span>
                           </td>
                           <td className="px-2 py-1 sm:px-4 sm:py-2 text-center">
                             <button
@@ -442,13 +450,10 @@ export default function EditOrder() {
                   {items.length > 0 && (
                     <tfoot>
                       <tr>
-                        <td
-                          colSpan={3}
-                          className="px-2 py-2 sm:px-4 sm:py-3 text-right text-xs sm:text-sm font-semibold text-gray-700"
-                        >
+                        <td colSpan={3} className="px-2 py-2 sm:px-4 sm:py-3 text-right text-xs sm:text-sm font-semibold text-coffee">
                           Total
                         </td>
-                        <td className="px-2 py-2 sm:px-4 sm:py-3 text-right text-sm sm:text-base font-semibold text-gray-900">
+                        <td className="px-2 py-2 sm:px-4 sm:py-3 text-right text-sm sm:text-base font-semibold text-coffee">
                           {CLP.format(total)}
                         </td>
                         <td />
@@ -458,7 +463,7 @@ export default function EditOrder() {
                 </table>
               </div>
 
-              {/* Acciones - mejor spacing en móvil */}
+              {/* Acciones */}
               <div className="mt-6 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3">
                 <button
                   type="button"
@@ -474,7 +479,7 @@ export default function EditOrder() {
                   <button
                     type="button"
                     onClick={() => router.push('/orders')}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 active:scale-95 transition w-full sm:w-auto"
+                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-coffee hover:bg-gray-50 active:scale-95 transition w-full sm:w-auto"
                   >
                     Cancelar
                   </button>
@@ -482,7 +487,7 @@ export default function EditOrder() {
                     type="button"
                     onClick={handleSave}
                     disabled={saving}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-indigo-700 active:scale-95 transition disabled:opacity-60 w-full sm:w-auto"
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-brand-700 active:scale-95 transition disabled:opacity-60 w-full sm:w-auto"
                   >
                     <Save size={16} />
                     {saving ? 'Guardando…' : 'Guardar cambios'}

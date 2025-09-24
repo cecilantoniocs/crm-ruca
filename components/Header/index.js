@@ -42,19 +42,19 @@ const Header = ({ setMenuOpen }) => {
         </button>
 
         {/* Marca */}
-        <Link href="/" className="text-base sm:text-lg font-semibold tracking-tight text-gray-800">
-          <span className="text-gray-900">CRM</span>{' '}
-          <span className="text-indigo-600">Rucapellan</span>
+        <Link href="/" className="text-base sm:text-lg font-semibold tracking-tight text-coffee">
+          <span className="text-coffee">CRM</span>{' '}
+          <span className="text-brand-600">Rucapellan</span>
         </Link>
 
         {/* Usuario + Salir bonito */}
         <div className="flex items-center gap-2">
           {userName && (
             <div className="flex items-center gap-2 rounded-full border border-gray-200 bg-white px-2 py-1 shadow-sm">
-              <div className="h-7 w-7 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-semibold">
+              <div className="h-7 w-7 rounded-full bg-brand-600 text-white flex items-center justify-center text-xs font-semibold">
                 {initial}
               </div>
-              <span className="text-sm font-medium text-gray-700">{userName}</span>
+              <span className="text-sm font-medium text-coffee">{userName}</span>
             </div>
           )}
 
@@ -62,7 +62,7 @@ const Header = ({ setMenuOpen }) => {
           <button
             type="button"
             onClick={logout}
-            className="group inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white pl-2 pr-2 sm:pl-3 sm:pr-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 hover:border-gray-300 shadow-sm active:scale-95 transition"
+            className="group inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white pl-2 pr-2 sm:pl-3 sm:pr-3 py-1.5 text-sm text-coffee hover:bg-gray-50 hover:border-gray-300 shadow-sm active:scale-95 transition"
             aria-label="Cerrar sesión"
             title="Salir"
           >

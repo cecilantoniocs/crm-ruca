@@ -67,7 +67,6 @@ export default async function handler(req, res) {
       if (from) query = query.gte('delivery_date', from);
       if (to) query = query.lte('delivery_date', to);
       if (q && q.trim()) {
-        // Busca en nombre/local del cliente (case-insensitive)
         query = query.or(
           `client_name.ilike.%${q.trim()}%,client_local.ilike.%${q.trim()}%`
         );
@@ -88,7 +87,7 @@ export default async function handler(req, res) {
       const body = req.body || {};
       const items = Array.isArray(body.items) ? body.items : [];
 
-      // 1) Insertamos la orden
+      // 1) Insert orden
       const insertRow = fromCamel(body);
       const { data: order, error: e1 } = await supabaseServer
         .from('orders')
@@ -97,7 +96,7 @@ export default async function handler(req, res) {
         .single();
       if (e1) throw e1;
 
-      // 2) Insertamos ítems, si hay
+      // 2) Insert items (si hay)
       if (items.length > 0) {
         const itemsRows = items.map((it) => ({
           order_id: order.id,
@@ -117,7 +116,7 @@ export default async function handler(req, res) {
         if (e2) throw e2;
       }
 
-      // 3) Devolvemos la orden completa con items
+      // 3) Devolver orden completa con items
       const { data: full, error: e3 } = await supabaseServer
         .from('orders')
         .select(

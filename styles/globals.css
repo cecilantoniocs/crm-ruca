@@ -1,4 +1,57 @@
 /* styles/globals.css */
 @import "tailwindcss";
+/* ---- Paleta Ruca (Tailwind v4 @theme) ---- */
+@theme {
+  /* Amarillo brand */
+  --color-brand-50:  #fff7cc;
+  --color-brand-100: #ffef99;
+  --color-brand-200: #ffe566;
+  --color-brand-300: #ffdb33;
+  --color-brand-400: #ffd100;
+  --color-brand-500: #fcc800; /* principal */
+  --color-brand-600: #e0b300;
+  --color-brand-700: #b38f00;
+  --color-brand-800: #806600;
+  --color-brand-900: #4d3d00;
+  --color-brand: var(--color-brand-500);
 
-/* Si necesitas estilos extra, pon CSS normal aquí (sin @apply) */
+  /* Café y negro de apoyo */
+  --color-coffee: #3b2f2f;
+  --color-ink:    #0b0b0b;
+}
+/* --- Ajustes globales suaves (sin @apply) --- */
+html, body, #__next {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #f7f7f7;          /* fondo claro neutro */
+  color: #0b0b0b;               /* texto principal (ink) */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Selección de texto con tu brand */
+::selection {
+  background-color: #fcc800;    /* brand */
+  color: #0b0b0b;
+}
+
+/* Imágenes y media responsivas por defecto */
+img, svg, video, canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* Formularios heredan tipografía */
+button, input, select, textarea {
+  font: inherit;
+}
+
+/* Links sin subrayado por defecto (Tailwind se encarga de estilos utilitarios) */
+a {
+  color: inherit;
+  text-decoration: none;
+}

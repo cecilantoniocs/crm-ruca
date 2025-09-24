@@ -57,10 +57,10 @@ export default function UsersPage() {
     const map = {
       admin: 'bg-gray-900 text-white',
       repartidor: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-      vendedor: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
+      vendedor: 'bg-brand-50 text-brand-700 ring-brand-200',
       supervisor: 'bg-amber-50 text-amber-700 ring-amber-200',
     };
-    const cls = map[r] || 'bg-gray-50 text-gray-700 ring-gray-200';
+    const cls = map[r] || 'bg-gray-50 text-coffee ring-gray-200';
     return <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs ring-1 ${cls}`}>{role || '—'}</span>;
   };
 
@@ -68,13 +68,13 @@ export default function UsersPage() {
     <Layout>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
-        <h1 className="text-3xl font-bold text-gray-800 tracking-tight">
-          Gestión de <span className="text-indigo-600">Usuarios</span>
+        <h1 className="text-3xl font-bold text-coffee tracking-tight">
+          Gestión de <span className="text-brand-600">Usuarios</span>
         </h1>
 
         <button
           onClick={() => router.push('/newuser')}
-          className="mt-3 sm:mt-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium shadow hover:bg-indigo-700 active:scale-95 transition"
+          className="mt-3 sm:mt-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-600 text-white font-medium shadow hover:bg-brand-700 active:scale-95 transition"
         >
           <UserPlus size={18} />
           Nuevo Usuario
@@ -88,7 +88,7 @@ export default function UsersPage() {
           <input
             type="text"
             placeholder="Buscar por nombre, email o perfil…"
-            className="pl-10 pr-4 py-2 w-full rounded-lg border border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm"
+            className="pl-10 pr-4 py-2 w-full rounded-lg border border-gray-300 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -118,7 +118,7 @@ export default function UsersPage() {
             <div key={u.id} className="relative bg-white rounded-xl shadow p-3 border border-gray-100">
               <div className="flex items-start justify-between">
                 <div>
-                  <h3 className="text-base font-semibold text-gray-900">{u.name || '—'}</h3>
+                  <h3 className="text-base font-semibold text-coffee">{u.name || '—'}</h3>
                   <p className="text-sm text-gray-600">{u.email || '—'}</p>
                   <p className="text-xs text-gray-500 mt-1">Perfil: <span className="font-medium">{u.profileName || '—'}</span></p>
                 </div>
@@ -135,7 +135,7 @@ export default function UsersPage() {
               <div className="mt-3 flex items-center gap-2">
                 <button
                   onClick={() => router.push(`/edituser/${u.id}`)}
-                  className="inline-flex h-8 px-3 items-center justify-center rounded-lg bg-indigo-600 text-white text-xs hover:bg-indigo-700 active:scale-95"
+                  className="inline-flex h-8 px-3 items-center justify-center rounded-lg bg-brand-600 text-white text-xs hover:bg-brand-700 active:scale-95"
                 >
                   <Pencil size={14} className="mr-1" /> Editar
                 </button>
@@ -168,9 +168,9 @@ export default function UsersPage() {
               <tbody className="divide-y divide-gray-200">
                 {filtered.map((u, idx) => (
                   <tr key={u.id} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100`}>
-                    <td className="px-6 py-3 text-sm text-gray-900">{u.name || '—'}</td>
-                    <td className="px-6 py-3 text-sm text-gray-700">{u.email || '—'}</td>
-                    <td className="px-6 py-3 text-sm text-gray-700">{u.profileName || '—'}</td>
+                    <td className="px-6 py-3 text-sm text-coffee">{u.name || '—'}</td>
+                    <td className="px-6 py-3 text-sm text-coffee">{u.email || '—'}</td>
+                    <td className="px-6 py-3 text-sm text-coffee">{u.profileName || '—'}</td>
                     <td className="px-6 py-3 text-sm"><RoleBadge role={u.role} /></td>
                     <td className="px-6 py-3 text-sm">
                       <div className="relative flex items-center justify-center">

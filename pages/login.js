@@ -1,87 +1,51 @@
-import React, { useState } from 'react';
-import Layout from '../components/Layout';
+// pages/login.js
+import React, { useEffect, useState } from 'react';
 import { useFormik } from 'formik';
 import * as Yup from 'yup';
-import axiosClient from '../config/axios';
 import { useRouter } from 'next/router';
+import Image from 'next/image';
+import axios from 'axios';
 
-export default function Home() {
+const logoUrl =
+  process.env.NEXT_PUBLIC_BRAND_LOGO_URL || '/brand/rucapellan-logo.png';
+
+export default function LoginPage() {
   const router = useRouter();
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Si ya hay sesión, redirige fuera del login
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const isAuth = localStorage.getItem('isAuth') === 'true';
+    const hasUser = !!localStorage.getItem('userData');
+    if (isAuth && hasUser) {
+      const next = router.query.next ? decodeURIComponent(router.query.next) : '/';
+      router.replace(next);
+    }
+  }, [router, router.query.next]);
+
   const formik = useFormik({
-    initialValues: {
-      email: '',
-      password: '',
-    },
+    initialValues: { email: '', password: '' },
     validationSchema: Yup.object({
       email: Yup.string().email('Email inválido').required('El email es obligatorio'),
       password: Yup.string().required('La contraseña es obligatoria'),
     }),
-    onSubmit: async (data) => {
+    onSubmit: async ({ email, password }) => {
       try {
         setIsSubmitting(true);
-
-        // Llamamos a nuestro API Route que valida contra Supabase
-        const resp = await axiosClient.post('auth/login', {
-          email: data.email,
-          password: data.password,
-        });
-
-        if (!resp?.data?.ok) {
-          localStorage.removeItem('userData');
-          localStorage.setItem('isAuth', 'false');
-          setMessage(resp?.data?.message || 'Email o contraseña incorrectos');
-          setTimeout(() => setMessage(''), 3000);
-          return;
-        }
-
-        // Usuario devuelto por el API
-        const u = resp.data.user || {};
-
-        // Normalizaciones de compatibilidad con el resto de la app
-        const role = String(u.role || '').trim().toLowerCase() || 'vendedor';
-        const isAdmin = Boolean(u.is_admin) || Boolean(u.isAdmin) || role === 'admin';
-
-        // Permisos por defecto si no vienen desde la BD
-        let permissions = Array.isArray(u.permissions) ? u.permissions : null;
-        if (!permissions) {
-          permissions = isAdmin
-            ? ['*']
-            : [
-                'orders:read',
-                'orders:create',
-                'orders:update',
-                'clients:read',
-                'clients:create',
-                'clients:update',
-                'products:read',
-              ];
-        }
-
-        const userPayload = {
-          id: u.id,
-          name: u.name,
-          email: u.email,
-          role,
-          isAdmin,          // camelCase (lo usa tu Sidebar)
-          is_admin: isAdmin, // snake_case (compat extra)
-          permissions,
-          profileName: u.profile_name || u.profileName || role,
-          partnerTag: u.partner_tag || u.partnerTag || '',
-          sellerId: u.seller_id || u.sellerId || u.id, // compat con helpers que usan sellerId
-        };
+        const { data } = await axios.post('/api/auth/login', { email, password });
+        const user = data?.user;
+        if (!user) throw new Error('Respuesta de login inválida');
 
         localStorage.setItem('isAuth', 'true');
-        localStorage.setItem('userData', JSON.stringify(userPayload));
+        localStorage.setItem('userData', JSON.stringify(user));
 
-        router.push('/');
+        const next = router.query.next ? decodeURIComponent(router.query.next) : '/';
+        router.replace(next);
       } catch (err) {
         console.error(err);
-        localStorage.removeItem('userData');
-        localStorage.setItem('isAuth', 'false');
-        setMessage('Error al conectar con el servidor');
+        setMessage('Email o contraseña incorrectos');
         setTimeout(() => setMessage(''), 3000);
       } finally {
         setIsSubmitting(false);
@@ -91,71 +55,106 @@ export default function Home() {
 
   const renderError = (field) =>
     formik.touched[field] && formik.errors[field] ? (
-      <p className="my-2 text-red-600 text-sm">{formik.errors[field]}</p>
+      <p className="mt-1 text-rose-600 text-xs">{formik.errors[field]}</p>
     ) : null;
 
   return (
-    <Layout>
-      <h1 className="text-center text-2xl text-white font-light">Login</h1>
+    <div className="relative min-h-screen bg-gradient-to-br from-gray-50 via-white to-[#F3D500]/15">
+      {/* fondo sutil con patrón */}
+      <div className="pointer-events-none absolute inset-0 [mask-image:radial-gradient(70%_50%_at_50%_0%,#000_0%,transparent_70%)]">
+        <div className="h-full w-full bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:20px_20px]" />
+      </div>
 
-      {message && (
-        <div className="bg-white py-2 px-3 w-full my-3 max-w-sm text-center mx-auto">
-          <p>{message}</p>
-        </div>
-      )}
-
-      <div className="flex justify-center mt-5">
-        <div className="w-full max-w-sm">
-          <form
-            className="bg-white rounded shadow-md px-8 pt-6 pb-8 mb-4"
-            onSubmit={formik.handleSubmit}
-          >
-            {/* Email */}
-            <div className="mb-4">
-              <label
-                className="block text-gray-700 text-sm font-bold mb-2"
-                htmlFor="email"
-              >
-                Email
-              </label>
-              <input
-                id="email"
-                type="email"
-                placeholder="Email Usuario"
-                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                {...formik.getFieldProps('email')}
-              />
-              {renderError('email')}
+      {/* movemos la tarjeta un poco hacia arriba */}
+      <div className="relative z-10 min-h-screen flex items-start justify-center px-4 pt-10 md:pt-16">
+        <div className="w-full max-w-md">
+          {/* Tarjeta */}
+          <div className="rounded-2xl border border-gray-200 bg-white/80 backdrop-blur-sm shadow-xl p-6 sm:p-8">
+            {/* Marca */}
+            <div className="flex flex-col items-center text-center">
+              <div className="mb-4">
+                <Image
+                  src={logoUrl}
+                  alt="Rucapellán"
+                  width={160}
+                  height={160}
+                  className="h-40 w-40 object-contain"
+                  priority
+                />
+              </div>
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-coffee">
+                CRM <span className="text-coffee">Ruca</span>
+              </h1>
             </div>
 
-            {/* Password */}
-            <div className="mb-4">
-              <label
-                className="block text-gray-700 text-sm font-bold mb-2"
-                htmlFor="password"
-              >
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                placeholder="Password Usuario"
-                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                {...formik.getFieldProps('password')}
-              />
-              {renderError('password')}
-            </div>
+            {/* Mensaje */}
+            {message && (
+              <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                {message}
+              </div>
+            )}
 
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="bg-gray-800 w-full mt-5 p-2 text-white uppercase font-bold hover:cursor-pointer hover:bg-gray-900 disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {isSubmitting ? 'Ingresando...' : 'Iniciar Sesión'}
-            </button>
-          </form>
+            {/* Formulario */}
+            <form className="mt-6 space-y-4" onSubmit={formik.handleSubmit} noValidate>
+              <div>
+                <label htmlFor="email" className="block text-sm font-medium text-coffee mb-1">
+                  Email
+                </label>
+                <input
+                  id="email"
+                  type="email"
+                  placeholder="admin@admin.com"
+                  inputMode="email"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
+                  {...formik.getFieldProps('email')}
+                />
+                {renderError('email')}
+              </div>
+
+              <div>
+                <label htmlFor="password" className="block text-sm font-medium text-coffee mb-1">
+                  Contraseña
+                </label>
+                <input
+                  id="password"
+                  type="password"
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
+                  {...formik.getFieldProps('password')}
+                />
+                {renderError('password')}
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="mt-2 inline-flex w-full items-center justify-center rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white shadow hover:bg-black transition disabled:opacity-60"
+              >
+                {isSubmitting ? 'Ingresando…' : 'Iniciar sesión'}
+              </button>
+            </form>
+
+            {/* Pie de tarjeta */}
+            <div className="mt-6 text-center">
+              <div className="inline-flex items-center gap-2 rounded-lg bg-[rgb(39,39,38)] px-3 py-1.5 text-xs font-medium text-white shadow-sm">
+                <span>CRM-Ruca v1.0</span>
+                <span className="opacity-70">•</span>
+                <span>Developed by Cecil ⚡</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Nota/legal mínima */}
+          <p className="mt-4 text-center text-xs text-gray-500">
+            Acceso restringido. Si necesitas ayuda, contacta al administrador.
+          </p>
         </div>
       </div>
-    </Layout>
+    </div>
   );
 }

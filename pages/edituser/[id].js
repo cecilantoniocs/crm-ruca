@@ -115,13 +115,13 @@ const EditUser = () => {
   return (
     <Layout>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-800">
-          Editar <span className="text-indigo-600">Usuario</span>
+        <h1 className="text-2xl font-bold text-coffee">
+          Editar <span className="text-brand-600">Usuario</span>
         </h1>
         <button
           type="button"
           onClick={() => router.back()}
-          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+          className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-coffee hover:bg-gray-50"
           title="Atrás"
         >
           <ArrowLeft size={16} />
@@ -138,20 +138,20 @@ const EditUser = () => {
         >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Nombre</label>
+              <label className="block text-sm font-medium text-coffee mb-1">Nombre</label>
               <input
                 type="text"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-1 focus:ring-brand-500"
                 {...formik.getFieldProps('name')}
               />
               {renderError('name')}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <label className="block text-sm font-medium text-coffee mb-1">Email</label>
               <input
                 type="email"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-1 focus:ring-brand-500"
                 {...formik.getFieldProps('email')}
               />
               {renderError('email')}
@@ -159,9 +159,9 @@ const EditUser = () => {
 
             {/* Rol */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Rol</label>
+              <label className="block text-sm font-medium text-coffee mb-1">Rol</label>
               <select
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:ring-1 focus:ring-brand-500"
                 value={formik.values.role}
                 onChange={handleRoleChange}
               >
@@ -175,13 +175,13 @@ const EditUser = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-coffee mb-1">
                 Etiqueta de socio (opcional)
               </label>
               <input
                 type="text"
                 placeholder="Ej: Cecil"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-1 focus:ring-brand-500"
                 {...formik.getFieldProps('partnerTag')}
               />
               {renderError('partnerTag')}
@@ -189,20 +189,20 @@ const EditUser = () => {
 
             {/* Cambio de contraseña (opcional) */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Nueva contraseña</label>
+              <label className="block text-sm font-medium text-coffee mb-1">Nueva contraseña</label>
               <input
                 type="password"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-1 focus:ring-brand-500"
                 {...formik.getFieldProps('newPassword')}
                 placeholder="Dejar en blanco para no cambiar"
               />
               {renderError('newPassword')}
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Confirmar contraseña</label>
+              <label className="block text-sm font-medium text-coffee mb-1">Confirmar contraseña</label>
               <input
                 type="password"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-1 focus:ring-indigo-500"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-1 focus:ring-brand-500"
                 {...formik.getFieldProps('confirmPassword')}
                 placeholder="Repite la nueva contraseña"
               />
@@ -213,7 +213,7 @@ const EditUser = () => {
           {/* Permisos */}
           <div className="mt-6">
             <div className="flex items-center justify-between mb-2">
-              <h2 className="text-sm font-semibold text-gray-800">Permisos</h2>
+              <h2 className="text-sm font-semibold text-coffee">Permisos</h2>
               {permsDisabled && (
                 <span className="text-xs text-gray-500">
                   El rol <b>Admin</b> tiene todos los permisos.
@@ -224,7 +224,7 @@ const EditUser = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {Object.entries(PERMISSIONS_SCHEMA).map(([mod, def]) => (
                 <div key={mod} className="rounded-lg border border-gray-200 p-3">
-                  <div className="text-sm font-medium text-gray-800 mb-2">{def.label}</div>
+                  <div className="text-sm font-medium text-coffee mb-2">{def.label}</div>
                   <div className="flex flex-wrap gap-2">
                     {Object.entries(def.actions).map(([key, label]) => {
                       const checked = !!formik.values.permissions?.[mod]?.[key];
@@ -232,7 +232,7 @@ const EditUser = () => {
                         <label
                           key={key}
                           className={`inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-xs ${
-                            checked ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-gray-300 text-gray-700'
+                            checked ? 'bg-brand-50 border-brand-200 text-brand-700' : 'bg-white border-gray-300 text-coffee'
                           } ${permsDisabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:bg-gray-50'}`}
                         >
                           <input
@@ -256,14 +256,14 @@ const EditUser = () => {
             <button
               type="button"
               onClick={() => router.push('/users')}
-              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-coffee hover:bg-gray-50"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={submitting}
-              className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-indigo-700 disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-brand-700 disabled:opacity-60"
             >
               <Save size={16} />
               {submitting ? 'Guardando…' : 'Guardar cambios'}
