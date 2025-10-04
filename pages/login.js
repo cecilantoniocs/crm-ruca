@@ -83,7 +83,7 @@ export default function LoginPage() {
                 />
               </div>
               <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-coffee">
-                CRM <span className="text-coffee">Ruca</span>
+                Rook<span className="text-coffee">App</span>
               </h1>
             </div>
 
