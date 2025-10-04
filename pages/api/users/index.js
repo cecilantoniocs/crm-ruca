@@ -1,6 +1,6 @@
 // /pages/api/users/index.js
 import { supabaseServer } from '@/lib/supabaseServer';
-import { getReqUser, requirePerm } from '@/server/guard';
+import { getReqUser, requirePerm, requireAnyPerm } from '@/server/guard';
 import bcrypt from 'bcryptjs';
 
 /* ====== helpers compartidos ====== */
@@ -33,9 +33,9 @@ function permsObjectToList(permsObj = {}) {
   add(p.delete, 'products:delete');
 
   const s = permsObj.sales || {};
-  add(s.view,         'sales:read');
-  add(s.togglePaid,   'sales:update');
-  add(s.toggleInvoice,'sales:update');
+  add(s.view,          'sales:read');
+  add(s.togglePaid,    'sales:update');
+  add(s.toggleInvoice, 'sales:update');
 
   const u = permsObj.users || {};
   add(u.view,   'users.read');
@@ -101,7 +101,8 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === 'GET') {
-      requirePerm(user, 'users.list');
+      // ✅ Permite listar usuarios si tiene users.read o sales.read (o es admin)
+      requireAnyPerm(user, ['users.read', 'sales.read']);
 
       const { data, error } = await supabaseServer
         .from('users_app')

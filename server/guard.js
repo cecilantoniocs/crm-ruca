@@ -115,3 +115,18 @@ export function requirePerm(user, perm) {
   err.status = 403;
   throw err;
 }
+
+// ✅ Nuevo helper: permite si el usuario tiene AL MENOS UNO de la lista
+export function requireAnyPerm(user, perms = []) {
+  requireAuth(user);
+  if (user.is_admin || user.isAdmin) return;
+
+  const have = new Set((user.permissions || []).map(normalizePermKey));
+  for (const p of perms) {
+    if (have.has('*') || have.has(normalizePermKey(p))) return;
+  }
+
+  const err = new Error('FORBIDDEN');
+  err.status = 403;
+  throw err;
+}
