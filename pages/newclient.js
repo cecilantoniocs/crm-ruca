@@ -1,5 +1,5 @@
 // pages/newclient.js
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import { useFormik } from 'formik';
 import * as Yup from 'yup';
@@ -19,11 +19,7 @@ const normalizeRut = (raw) => {
   }
   return clean;
 };
-
-const validateRutBasic = (rut) => {
-  if (!rut) return true;
-  return /^\d{7,8}-[\dK]$/.test(rut);
-};
+const validateRutBasic = (rut) => (!rut ? true : /^\d{7,8}-[\dK]$/.test(rut));
 
 function InputField({ formik, id, label, type = 'text', onChange, onBlur, ...rest }) {
   return (
@@ -63,7 +59,7 @@ function PhoneInput({ formik }) {
           inputMode="numeric"
           maxLength={9}
           placeholder="9 dígitos"
-          className="w-full rounded-r-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600 text-sm"
+          className="w-full rounded-r-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600"
           value={formik.values.telefono}
           onChange={(e) => {
             const digitsOnly = e.target.value.replace(/\D/g, '');
@@ -92,11 +88,11 @@ const NewClient = () => {
       zona: '',
       ciudad: '',
       telefono: '',
-      email: '',
+      email: '',          // <- opcional
       rut: '',
       razon_social: '',
-      clientType: 'b2b',     // default B2B
-      clientOwner: '',       // requerido, empieza vacío
+      clientType: 'b2b',
+      clientOwner: '',
     },
     validationSchema: Yup.object({
       name: Yup.string().required('El nombre es obligatorio'),
@@ -104,12 +100,17 @@ const NewClient = () => {
       dir1: Yup.string().required('La dirección es obligatoria'),
       zona: Yup.string().required('La zona es obligatoria'),
       ciudad: Yup.string().required('La ciudad es obligatoria'),
-      telefono: Yup.string().matches(/^\d+$/, 'Solo números').min(8, 'Muy corto').max(9, 'Muy largo').required('El teléfono es obligatorio'),
-      email: Yup.string().email('Email inválido').required('El email es obligatorio'),
+      telefono: Yup.string()
+        .matches(/^\d+$/, 'Solo números')
+        .min(8, 'Muy corto')
+        .max(9, 'Muy largo')
+        .required('El teléfono es obligatorio'),
+      // EMAIL OPCIONAL: si viene vacío no valida; si viene con valor, debe ser email válido
+      email: Yup.string().trim().email('Email inválido'),
       rut: Yup.string().test('rut-basic', 'RUT inválido (ej: 12345678-9)', validateRutBasic),
       razon_social: Yup.string(),
       clientType: Yup.mixed().oneOf(['b2b','b2c']).required(),
-      clientOwner: Yup.mixed().oneOf(['rucapellan','cecil'], 'Selecciona una opción').required('Asignado a es obligatorio'),
+      clientOwner: Yup.mixed().oneOf(['', 'rucapellan','cecil']),
     }),
     onSubmit: async (val) => {
       try {
@@ -119,19 +120,27 @@ const NewClient = () => {
           await Swal.fire('Error', 'No se encontró el vendedor actual', 'error');
           return;
         }
+
         const telefonoFull = `+56${val.telefono}`;
+        const emailClean = String(val.email || '').trim().toLowerCase();
+
+        // Construimos el payload y OMITIMOS "email" si viene vacío
         const payload = {
-          ...val,
+          name: val.name,
+          nombre_local: val.nombre_local,
+          dir1: val.dir1,
+          zona: val.zona,
+          ciudad: val.ciudad,
           telefono: telefonoFull,
           rut: normalizeRut(val.rut),
-          sellerId: seller.id,
-          // normalizamos por si vinieran capitalizadas
+          razon_social: val.razon_social || null,
           clientType: String(val.clientType || 'b2b').toLowerCase(),
           clientOwner: String(val.clientOwner || '').toLowerCase(),
+          sellerId: seller.id,
         };
+        if (emailClean) payload.email = emailClean; // sólo si hay valor
 
         await axiosClient.post('clients', payload);
-
         await Swal.fire('¡Cliente creado!', 'El cliente ha sido registrado con éxito.', 'success');
         router.push('/client');
       } catch (error) {
@@ -142,6 +151,28 @@ const NewClient = () => {
       }
     },
   });
+
+  // Autoselect "Asignado a" según partner_tag
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await axiosClient.get('auth/me');
+        const raw =
+          data?.user?.partner_tag ??
+          data?.user?.partnerTag ??
+          data?.partner_tag ??
+          data?.partnerTag ??
+          '';
+        const tag = String(raw).trim().toLowerCase();
+        if ((tag === 'rucapellan' || tag === 'cecil') && !formik.values.clientOwner) {
+          formik.setFieldValue('clientOwner', tag);
+        }
+      } catch (e) {
+        console.warn('No se pudo cargar el usuario para autoselect owner', e);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <Layout>
@@ -162,95 +193,96 @@ const NewClient = () => {
         </button>
       </div>
 
-      <div className="mx-auto w-full max-w-2xl">
-        <form className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm" onSubmit={formik.handleSubmit} noValidate>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <InputField formik={formik} id="name" label="Nombre" />
-            <InputField formik={formik} id="nombre_local" label="Nombre del local" />
-            <InputField formik={formik} id="dir1" label="Dirección" />
-            <InputField formik={formik} id="zona" label="Zona" />
-            <InputField formik={formik} id="ciudad" label="Ciudad" />
-            <div className="md:col-span-2">
-              <PhoneInput formik={formik} />
-            </div>
-            <div className="md:col-span-2">
-              <InputField formik={formik} id="email" label="Correo electrónico" type="email" />
-            </div>
-
-            {/* Tipo de cliente */}
-            <div className="md:col-span-1">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de cliente</label>
-              <select
-                id="clientType"
-                name="clientType"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600 text-sm bg-white"
-                value={formik.values.clientType}
-                onChange={formik.handleChange}
-                onBlur={formik.handleBlur}
-              >
-                <option value="b2b">B2B</option>
-                <option value="b2c">B2C</option>
-              </select>
-              {formik.touched.clientType && formik.errors.clientType && (
-                <p className="mt-1 text-xs text-rose-600">{formik.errors.clientType}</p>
-              )}
-            </div>
-
-            {/* Asignado a (obligatorio, inicia vacío) */}
-            <div className="md:col-span-1">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Asignado a</label>
-              <select
-                id="clientOwner"
-                name="clientOwner"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600 text-sm bg-white"
-                value={formik.values.clientOwner}
-                onChange={(e) => formik.setFieldValue('clientOwner', e.target.value)}
-                onBlur={formik.handleBlur}
-              >
-                <option value="">{'— Selecciona —'}</option>
-                <option value="rucapellan">Rucapellan</option>
-                <option value="cecil">Cecil</option>
-              </select>
-              {formik.touched.clientOwner && formik.errors.clientOwner && (
-                <p className="mt-1 text-xs text-rose-600">{formik.errors.clientOwner}</p>
-              )}
-            </div>
-
-            {/* Opcionales */}
-            <InputField
-              formik={formik}
-              id="rut"
-              label="RUT (sin puntos, con guion)"
-              onBlur={(e) => {
-                const v = normalizeRut(e.target.value);
-                formik.setFieldValue('rut', v);
-                formik.handleBlur(e);
-              }}
-            />
-            <InputField formik={formik} id="razon_social" label="Razón social" />
+      <form
+        className="mx-auto w-full max-w-2xl rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
+        onSubmit={formik.handleSubmit}
+        noValidate
+      >
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <InputField formik={formik} id="name" label="Nombre" />
+          <InputField formik={formik} id="nombre_local" label="Nombre del local" />
+          <InputField formik={formik} id="dir1" label="Dirección" />
+          <InputField formik={formik} id="zona" label="Zona" />
+          <InputField formik={formik} id="ciudad" label="Ciudad" />
+          <div className="md:col-span-2">
+            <PhoneInput formik={formik} />
+          </div>
+          <div className="md:col-span-2">
+            <InputField formik={formik} id="email" label="Correo electrónico (opcional)" type="email" />
           </div>
 
-          <div className="mt-6 flex items-center justify-end gap-3">
-            <button
-              type="button"
-              onClick={() => router.push('/client')}
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 active:scale-95 transition"
-              title="Cancelar"
+          {/* Tipo cliente */}
+          <div className="md:col-span-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de cliente</label>
+            <select
+              id="clientType"
+              name="clientType"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600"
+              value={formik.values.clientType}
+              onChange={formik.handleChange}
+              onBlur={formik.handleBlur}
             >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-brand-700 disabled:opacity-60 disabled:cursor-not-allowed active:scale-95 transition"
-              title="Crear cliente"
-            >
-              <UserPlus size={16} />
-              {isSubmitting ? 'Creando…' : 'Crear cliente'}
-            </button>
+              <option value="b2b">B2B</option>
+              <option value="b2c">B2C</option>
+            </select>
+            {formik.touched.clientType && formik.errors.clientType && (
+              <p className="mt-1 text-xs text-rose-600">{formik.errors.clientType}</p>
+            )}
           </div>
-        </form>
-      </div>
+
+          {/* Asignado a (opcional) */}
+          <div className="md:col-span-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Asignado a</label>
+            <select
+              id="clientOwner"
+              name="clientOwner"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600"
+              value={formik.values.clientOwner}
+              onChange={(e) => formik.setFieldValue('clientOwner', e.target.value)}
+              onBlur={formik.handleBlur}
+            >
+              <option value="">{'— Selecciona —'}</option>
+              <option value="rucapellan">Rucapellan</option>
+              <option value="cecil">Cecil</option>
+            </select>
+            {formik.touched.clientOwner && formik.errors.clientOwner && (
+              <p className="mt-1 text-xs text-rose-600">{formik.errors.clientOwner}</p>
+            )}
+          </div>
+
+          {/* Opcionales */}
+          <InputField
+            formik={formik}
+            id="rut"
+            label="RUT (sin puntos, con guion)"
+            onBlur={(e) => {
+              const v = normalizeRut(e.target.value);
+              formik.setFieldValue('rut', v);
+              formik.handleBlur(e);
+            }}
+          />
+          <InputField formik={formik} id="razon_social" label="Razón social (opcional)" />
+        </div>
+
+        <div className="mt-6 flex items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={() => router.push('/client')}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 active:scale-95 transition"
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-brand-700 disabled:opacity-60 disabled:cursor-not-allowed active:scale-95 transition"
+            title="Crear cliente"
+          >
+            <UserPlus size={16} />
+            {isSubmitting ? 'Creando…' : 'Crear cliente'}
+          </button>
+        </div>
+      </form>
     </Layout>
   );
 };

@@ -66,7 +66,7 @@ export default function Products() {
 
   const stop = (e) => e.stopPropagation();
 
-  const handleDelete = async (id) => {
+    const handleDelete = async (id) => {
     const ok = window.confirm('¿Eliminar este producto? Esta acción no se puede deshacer.');
     if (!ok) return;
     try {
@@ -74,9 +74,19 @@ export default function Products() {
       setProducts((prev) => prev.filter((p) => p.id !== id));
     } catch (e) {
       console.error(e);
-      alert('No se pudo eliminar el producto.');
+      const status = e?.response?.status;
+      const msg = e?.response?.data?.error || 'No se pudo eliminar el producto.';
+
+      if (status === 403) {
+        alert('No tienes permiso para eliminar productos (products.delete).');
+      } else if (status === 409) {
+        alert('No se puede eliminar: el producto está asociado a pedidos.');
+      } else {
+        alert(msg);
+      }
     }
   };
+
 
   const handleEdit = (id) => {
     // 🔧 ahora sí navega al editor

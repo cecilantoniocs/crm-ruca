@@ -1,9 +1,11 @@
+// pages/editproduct/[id].js
 import React, { useEffect, useState } from 'react';
 import Layout from '../../components/Layout';
 import { useRouter } from 'next/router';
 import { useFormik } from 'formik';
 import * as Yup from 'yup';
 import axiosClient from '../../config/axios';
+import Swal from 'sweetalert2';
 import { ArrowLeft, Save, Image as ImageIcon, Upload, X } from 'lucide-react';
 
 const EditProduct = () => {
@@ -14,8 +16,8 @@ const EditProduct = () => {
   const [loadError, setLoadError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // imagen local nueva (archivo) + preview
-  const [file, setFile] = useState(null);
+  // Imagen actual (URL pública) y preview
+  const [imageUrl, setImageUrl] = useState('');
   const [preview, setPreview] = useState(null);
 
   // datos actuales del producto
@@ -31,9 +33,9 @@ const EditProduct = () => {
         const res = await axiosClient.get(`products/${id}`);
         const p = res?.data ?? null;
         setCurrent(p);
-        // si hay imagen, set preview inicial
-        const existing = p?.image_url || p?.imageUrl || '';
-        if (existing) setPreview(existing);
+        const existing = p?.imageUrl || p?.image_url || '';
+        setImageUrl(existing || '');
+        setPreview(existing || null);
       } catch (e) {
         console.error(e);
         setLoadError('Error al cargar producto.');
@@ -50,80 +52,90 @@ const EditProduct = () => {
       name: current?.name || '',
       category: current?.category || '',
       sku: current?.sku || '',
-      // costo opcional
+      // costo opcional (dejar como string para que el backend acepte number|string)
       cost: current?.cost ?? '',
       // peso opcional (texto)
       weight: current?.weight || '',
-      // solo para mantener una referencia si no cambian la imagen
-      image_url: current?.image_url || current?.imageUrl || '',
     },
     validationSchema: Yup.object({
       name: Yup.string().required('El nombre es obligatorio'),
       category: Yup.string(),
       sku: Yup.string(),
-      cost: Yup.mixed()
+      // Permitimos string vacío; si viene, debe ser número válido
+      cost: Yup.string()
         .test('es-numero', 'Debe ser un número válido', (val) => {
-          if (val === '' || val === null || val === undefined) return true; // opcional
+          if (val === '' || val == null) return true;
           return !isNaN(Number(val));
-        })
-        .nullable(),
+        }),
       weight: Yup.string().nullable(),
     }),
     onSubmit: async (val) => {
       try {
         setIsSubmitting(true);
 
-        // 1) Subir imagen si seleccionaron un archivo nuevo
-        let imageUrl = val.image_url || ''; // existente
-        if (file) {
-          const form = new FormData();
-          form.append('file', file);
-          // tu /api/upload ya debería existir (multer). Ajusta si el campo cambia.
-          const up = await axiosClient.post('upload', form, {
-            headers: { 'Content-Type': 'multipart/form-data' },
-          });
-          imageUrl = up?.data?.url || up?.data?.path || up?.data?.location || '';
+        // Construir payload SOLO con campos presentes
+        const payload = { name: val.name };
+
+        if (val.category?.trim()) payload.category = val.category.trim();
+        if (val.sku?.trim()) payload.sku = val.sku.trim();
+
+        // cost: si viene string no vacío => número; si viene vacío => no enviar
+        if (val.cost !== '' && val.cost != null) {
+          payload.cost = Number(val.cost);
         }
 
-        // 2) Normalizar costo opcional
-        const cost =
-          val.cost === '' || val.cost === null || val.cost === undefined
-            ? null
-            : Number(val.cost);
+        if (val.weight?.trim()) payload.weight = val.weight.trim();
 
-        // 3) Enviar PATCH
-        const payload = {
-          name: val.name,
-          category: val.category || null,
-          sku: val.sku || null,
-          cost,                       // opcional -> null si vacío
-          weight: val.weight || null, // opcional
-          image_url: imageUrl || null,
-        };
+        // imageUrl: si hay string no vacío, mandarlo; si está vacío, NO lo mandamos
+        const img = imageUrl && String(imageUrl).trim();
+        if (img) payload.imageUrl = String(img);
 
         await axiosClient.patch(`products/${id}`, payload);
+        await Swal.fire('¡Guardado!', 'Producto actualizado correctamente', 'success');
         router.push('/products');
       } catch (e) {
         console.error(e);
-        alert('No se pudo actualizar el producto.');
+        const msg =
+          e?.response?.data?.detail ||
+          e?.response?.data?.error ||
+          'No se pudo actualizar el producto.';
+        Swal.fire('Error', String(msg), 'error');
       } finally {
         setIsSubmitting(false);
       }
     },
   });
 
-  // Manejo archivo local
-  const onPickFile = (e) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setFile(f);
-    setPreview(URL.createObjectURL(f));
+  // Subida de imagen (misma forma que en newproduct)
+  const handleImageUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const { data } = await axiosClient.post('upload?folder=products', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      if (data?.success && data?.publicUrl) {
+        setImageUrl(data.publicUrl);
+        setPreview(data.publicUrl);
+        await Swal.fire('Imagen subida', 'La imagen fue cargada correctamente', 'success');
+      } else {
+        throw new Error(data?.error || 'Error en la subida');
+      }
+    } catch (err) {
+      console.error(err);
+      Swal.fire('Error', 'No se pudo subir la imagen', 'error');
+    } finally {
+      e.target.value = '';
+    }
   };
 
   const clearImage = () => {
-    setFile(null);
+    setImageUrl('');
     setPreview(null);
-    formik.setFieldValue('image_url', '');
   };
 
   const renderError = (field) =>
@@ -231,7 +243,7 @@ const EditProduct = () => {
                 {renderError('weight')}
               </div>
 
-              {/* Imagen */}
+              {/* Imagen (misma forma que newproduct) */}
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-coffee-900 mb-1">
                   Fotografía
@@ -265,25 +277,9 @@ const EditProduct = () => {
                         type="file"
                         accept="image/*"
                         className="hidden"
-                        onChange={onPickFile}
+                        onChange={handleImageUpload}
                       />
                     </label>
-
-                    {/* Si quieres permitir pegar una URL manual, descomenta esto:
-                    <div className="mt-2">
-                      <input
-                        type="text"
-                        placeholder="o pega una URL de imagen"
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600"
-                        value={formik.values.image_url || ''}
-                        onChange={(e) => {
-                          setFile(null);
-                          setPreview(e.target.value || null);
-                          formik.setFieldValue('image_url', e.target.value);
-                        }}
-                      />
-                    </div>
-                    */}
                   </div>
                 </div>
               </div>

@@ -1,16 +1,9 @@
-// pages/client/index.js
+// pages/client.js
 import React, { useEffect, useMemo, useState } from 'react';
 import Layout from '../components/Layout';
-import { getCurrentSeller, getClients } from '../helpers';
 import { useRouter } from 'next/router';
 import axiosClient from '../config/axios';
-import {
-  Phone,
-  UserPlus,
-  Search,
-  MoreVertical,
-  ShoppingCart,
-} from 'lucide-react';
+import { Phone, UserPlus, Search, MoreVertical, ShoppingCart } from 'lucide-react';
 
 const pillCls = 'inline-flex items-center rounded-full ring-1 px-2 py-0.5 text-[11px] font-medium';
 
@@ -23,7 +16,7 @@ const ClientPage = () => {
   const [loadError, setLoadError] = useState('');
   const [openMenuId, setOpenMenuId] = useState(null); // id del popover abierto
 
-  // Filtros
+  // Filtros UI
   const [ownerFilter, setOwnerFilter] = useState('all'); // all | rucapellan | cecil
   const [typeFilter, setTypeFilter] = useState('all');   // all | b2b | b2c
 
@@ -40,19 +33,19 @@ const ClientPage = () => {
     return () => window.removeEventListener('click', close);
   }, []);
 
-  // Cargar clientes
+  // Cargar clientes (SIN ownerId). Solo mandamos params si el filtro NO es "all".
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
         setLoadError('');
-        const seller = getCurrentSeller?.();
-        if (!seller?.id) {
-          setClients([]);
-          setLoadError('No se encontró el vendedor actual.');
-          return;
-        }
-        const res = await getClients(seller.id);
+
+        const params = {};
+        if (debounced) params.q = debounced;
+        if (ownerFilter !== 'all') params.clientOwner = ownerFilter;
+        if (typeFilter !== 'all')  params.type = typeFilter;
+
+        const res = await axiosClient.get('clients', { params });
         const ordered = (res?.data ?? []).sort((a, b) =>
           (a?.name || '').localeCompare(b?.name || '', 'es', { sensitivity: 'base' })
         );
@@ -60,43 +53,23 @@ const ClientPage = () => {
       } catch (err) {
         console.error(err);
         setLoadError('Error al cargar clientes.');
+        setClients([]);
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [debounced, ownerFilter, typeFilter]);
 
   const normalized = (c) => {
-    // Asegurar llaves nuevas en caso que la API use snake_case
     const clientOwner = (c.clientOwner ?? c.client_owner ?? '').toString().toLowerCase();
     const clientType  = (c.clientType  ?? c.client_type  ?? '').toString().toLowerCase();
     return { ...c, clientOwner, clientType };
   };
 
   const filteredClients = useMemo(() => {
-    let rows = clients.map(normalized);
-
-    // Texto
-    if (debounced) {
-      rows = rows.filter((c) => {
-        const name = c?.name?.toLowerCase() || '';
-        const local = c?.nombre_local?.toLowerCase() || '';
-        return name.includes(debounced) || local.includes(debounced);
-      });
-    }
-
-    // Asignado a
-    if (ownerFilter !== 'all') {
-      rows = rows.filter((c) => c.clientOwner === ownerFilter);
-    }
-
-    // Tipo
-    if (typeFilter !== 'all') {
-      rows = rows.filter((c) => c.clientType === typeFilter);
-    }
-
-    return rows;
-  }, [clients, debounced, ownerFilter, typeFilter]);
+    // Ya viene filtrado desde API según q/owner/type. Lo dejamos así para consistencia.
+    return clients.map(normalized);
+  }, [clients]);
 
   // acciones
   const handleEdit = (id) => router.push(`/editclient/${id}`);
@@ -113,13 +86,14 @@ const ClientPage = () => {
     }
   };
 
+  // ✅ Ir a crear pedido con el cliente preseleccionado
   const handleNewOrder = (id) => {
-    // Cuando exista la página:
-    // router.push(`/neworder?clientId=${id}`)
-    alert('Pronto: crear nuevo pedido para este cliente.');
+    router.push({
+      pathname: '/neworder',
+      query: { clientId: id },
+    });
   };
 
-  // evitar que click dentro del menú cierre el menú (por el listener global)
   const stop = (e) => e.stopPropagation();
 
   const typePill = (t) => {
@@ -139,14 +113,19 @@ const ClientPage = () => {
   };
 
   const ownerPill = (o) => {
-    const v = (o || '').toString().toLowerCase();
-    const label = v === 'cecil' ? 'Cecil' : v === 'rucapellan' ? 'Rucapellan' : '—';
-    return (
-      <span className={`${pillCls} bg-gray-50 text-gray-700 ring-gray-200`}>
-        {label}
-      </span>
-    );
+  const v = (o || '').toString().toLowerCase();
+  const label = v === 'cecil' ? 'Cecil' : v === 'rucapellan' ? 'Rucapellan' : '—';
+
+  const cls =
+    v === 'rucapellan'
+      ? 'bg-rose-50 text-rose-700 ring-rose-200'
+      : v === 'cecil'
+      ? 'bg-sky-50 text-sky-700 ring-sky-200'
+      : 'bg-gray-50 text-gray-700 ring-gray-200';
+
+  return <span className={`${pillCls} ${cls}`}>{label}</span>;
   };
+
 
   return (
     <Layout>
@@ -166,17 +145,20 @@ const ClientPage = () => {
       </div>
 
       {/* Filtros superiores */}
-      <div className="grid gap-3 sm:grid-cols-3 mb-6">
+      <div className="grid gap-3 sm:grid-cols-3 sm:items-end mb-6">
         {/* Buscar */}
         <div className="relative">
-          <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
-          <input
-            type="text"
-            placeholder="Buscar por nombre o local..."
-            className="pl-10 pr-4 py-2 w-full rounded-lg border border-gray-300 shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600 text-sm"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
+          <label className="block text-xs font-medium text-gray-600 mb-1">Buscar</label>
+          <div className="relative">
+            <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
+            <input
+              type="text"
+              placeholder="Nombre o local..."
+              className="pl-10 pr-4 py-2 w-full rounded-lg border border-gray-300 shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600 text-sm"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
         </div>
 
         {/* Asignado a */}
@@ -220,6 +202,7 @@ const ClientPage = () => {
           {filteredClients.map((c, idx) => {
             const isLast = idx === filteredClients.length - 1;
             const { clientType, clientOwner } = normalized(c);
+            const stop = (e) => e.stopPropagation();
             return (
               <div
                 key={c.id}
@@ -241,7 +224,7 @@ const ClientPage = () => {
                     <MoreVertical size={18} />
                   </button>
 
-                  {/* Menú flotante (último abre hacia arriba) */}
+                  {/* Menú flotante */}
                   {openMenuId === c.id && (
                     <div
                       className={
@@ -252,19 +235,13 @@ const ClientPage = () => {
                     >
                       <button
                         className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                        onClick={() => {
-                          setOpenMenuId(null);
-                          handleEdit(c.id);
-                        }}
+                        onClick={() => { setOpenMenuId(null); handleEdit(c.id); }}
                       >
                         Editar
                       </button>
                       <button
                         className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
-                        onClick={() => {
-                          setOpenMenuId(null);
-                          handleDelete(c.id);
-                        }}
+                        onClick={() => { setOpenMenuId(null); handleDelete(c.id); }}
                       >
                         Eliminar
                       </button>
@@ -284,22 +261,10 @@ const ClientPage = () => {
 
                 {/* Datos */}
                 <div className="mt-3 space-y-1.5">
-                  <p className="text-sm text-coffee-900">
-                    <span className="font-medium">Dirección: </span>
-                    {c.dir1 || '—'}
-                  </p>
-                  <p className="text-sm text-coffee-900">
-                    <span className="font-medium">Zona: </span>
-                    {c.zona || '—'}
-                  </p>
-                  <p className="text-sm text-coffee-900">
-                    <span className="font-medium">Ciudad: </span>
-                    {c.ciudad || '—'}
-                  </p>
-                  <p className="text-sm text-coffee-900">
-                    <span className="font-medium">Teléfono: </span>
-                    {c.telefono || '—'}
-                  </p>
+                  <p className="text-sm text-coffee-900"><span className="font-medium">Dirección: </span>{c.dir1 || '—'}</p>
+                  <p className="text-sm text-coffee-900"><span className="font-medium">Zona: </span>{c.zona || '—'}</p>
+                  <p className="text-sm text-coffee-900"><span className="font-medium">Ciudad: </span>{c.ciudad || '—'}</p>
+                  <p className="text-sm text-coffee-900"><span className="font-medium">Teléfono: </span>{c.telefono || '—'}</p>
                 </div>
 
                 {/* Acciones rápidas */}
@@ -332,40 +297,42 @@ const ClientPage = () => {
         </div>
       )}
 
-      {/* DESKTOP: Tabla (sin wrappers de overflow) */}
+      {/* DESKTOP: Tabla (estilo productos) */}
       {!loading && !loadError && filteredClients.length > 0 && (
         <div className="hidden sm:block">
-          <div className="rounded-xl border border-gray-200 shadow-sm">
-            <table className="min-w-full">
+          {/* contenedor scroll horizontal sin centrar */}
+          <div className="w-full overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
+            <table className="w-full table-auto">
               <thead className="bg-gray-50 sticky top-0 z-20">
                 <tr className="text-left">
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Nombre</th>
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Local</th>
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Dirección</th>
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Zona</th>
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Ciudad</th>
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Teléfono</th>
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Tipo</th>
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Asignado a</th>
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-center">Pedido</th>
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-center">Acciones</th>
+                  <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Nombre</th>
+                  <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Local</th>
+                  <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Dirección</th>
+                  <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Zona</th>
+                  <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Ciudad</th>
+                  <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Teléfono</th>
+                  <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Tipo</th>
+                  <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Cartera</th>
+                  <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-center">Pedido</th>
+                  <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-center">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {filteredClients.map((c, idx) => {
                   const isLast = idx === filteredClients.length - 1;
                   const { clientType, clientOwner } = normalized(c);
+                  const stop = (e) => e.stopPropagation();
                   return (
                     <tr
                       key={c.id}
                       className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-colors`}
                     >
-                      <td className="px-6 py-3 text-sm text-coffee-900">{c.name || '—'}</td>
-                      <td className="px-6 py-3 text-sm text-coffee-900">{c.nombre_local || '—'}</td>
-                      <td className="px-6 py-3 text-sm text-coffee-900">{c.dir1 || '—'}</td>
-                      <td className="px-6 py-3 text-sm text-coffee-900">{c.zona || '—'}</td>
-                      <td className="px-6 py-3 text-sm text-coffee-900">{c.ciudad || '—'}</td>
-                      <td className="px-6 py-3 text-sm">
+                      <td className="px-4 lg:px-6 py-3 text-sm text-coffee-900">{c.name || '—'}</td>
+                      <td className="px-4 lg:px-6 py-3 text-sm text-coffee-900">{c.nombre_local || '—'}</td>
+                      <td className="px-4 lg:px-6 py-3 text-sm text-coffee-900">{c.dir1 || '—'}</td>
+                      <td className="px-4 lg:px-6 py-3 text-sm text-coffee-900">{c.zona || '—'}</td>
+                      <td className="px-4 lg:px-6 py-3 text-sm text-coffee-900">{c.ciudad || '—'}</td>
+                      <td className="px-4 lg:px-6 py-3 text-sm">
                         {c.telefono ? (
                           <a className="text-brand-700 hover:underline" href={`tel:${c.telefono}`}>
                             {c.telefono}
@@ -374,16 +341,13 @@ const ClientPage = () => {
                           <span className="text-gray-400">—</span>
                         )}
                       </td>
-                      <td className="px-6 py-3 text-sm">{typePill(clientType)}</td>
-                      <td className="px-6 py-3 text-sm">{ownerPill(clientOwner)}</td>
+                      <td className="px-4 lg:px-6 py-3 text-sm">{typePill(clientType)}</td>
+                      <td className="px-4 lg:px-6 py-3 text-sm">{ownerPill(clientOwner)}</td>
 
                       {/* Pedido */}
-                      <td className="px-6 py-3 text-center">
+                      <td className="px-4 lg:px-6 py-3 text-center">
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleNewOrder(c.id);
-                          }}
+                          onClick={(e) => { e.stopPropagation(); handleNewOrder(c.id); }}
                           className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-amber-500 text-white hover:bg-amber-600 shadow-sm active:scale-95 transition"
                           aria-label="Nuevo pedido"
                           title="Nuevo pedido"
@@ -392,8 +356,8 @@ const ClientPage = () => {
                         </button>
                       </td>
 
-                      {/* Acciones (popover fuera de la tabla, z-50; último abre hacia arriba) */}
-                      <td className="px-6 py-3">
+                      {/* Acciones */}
+                      <td className="px-4 lg:px-6 py-3">
                         <div className="relative flex items-center justify-center">
                           <button
                             type="button"
@@ -418,19 +382,13 @@ const ClientPage = () => {
                             >
                               <button
                                 className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                                onClick={() => {
-                                  setOpenMenuId(null);
-                                  handleEdit(c.id);
-                                }}
+                                onClick={() => { setOpenMenuId(null); handleEdit(c.id); }}
                               >
                                 Editar
                               </button>
                               <button
                                 className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
-                                onClick={() => {
-                                  setOpenMenuId(null);
-                                  handleDelete(c.id);
-                                }}
+                                onClick={() => { setOpenMenuId(null); handleDelete(c.id); }}
                               >
                                 Eliminar
                               </button>

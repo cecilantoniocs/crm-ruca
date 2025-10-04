@@ -2,31 +2,48 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { Users, Boxes, Truck, X, BarChart3, UserCog } from 'lucide-react';
+import axiosClient from '../../config/axios';
 
 const Sidebar = ({ menuOpen = false, setMenuOpen }) => {
   const router = useRouter();
   const [isAdminUI, setIsAdminUI] = useState(false);
 
+  const hasUsersPerm = (u) => {
+    const arr = Array.isArray(u?.permissions) ? u.permissions : [];
+    const lower = new Set(arr.map((p) => String(p).toLowerCase()));
+    return lower.has('*') || lower.has('users.list') || lower.has('users.read');
+  };
+  const isAdminFlag = (u) => !!(u?.is_admin || u?.isAdmin);
+
   useEffect(() => {
-    try {
-      const raw = typeof window !== 'undefined' ? localStorage.getItem('userData') : null;
-      const u = raw ? JSON.parse(raw) : null;
-
-      const roleRaw = (u?.role ?? u?.userRole ?? u?.type ?? '')
-        .toString()
-        .trim()
-        .toLowerCase();
-      const hasPerm =
-        Array.isArray(u?.permissions) &&
-        u.permissions.some((p) =>
-          ['users:manage', 'users:view'].includes(String(p).toLowerCase())
-        );
-      const flag = !!u?.isAdmin;
-
-      setIsAdminUI(roleRaw === 'admin' || roleRaw === 'administrador' || hasPerm || flag);
-    } catch {
-      setIsAdminUI(false);
-    }
+    let mounted = true;
+    (async () => {
+      try {
+        const { data } = await axiosClient.get('auth/me');
+        const me = data?.user || null;
+        if (mounted && me) {
+          setIsAdminUI(isAdminFlag(me) || hasUsersPerm(me));
+          return;
+        }
+      } catch {}
+      try {
+        const raw = typeof window !== 'undefined' ? localStorage.getItem('userData') : null;
+        const u = raw ? JSON.parse(raw) : null;
+        const roleRaw = (u?.role ?? u?.userRole ?? u?.type ?? '').toString().trim().toLowerCase();
+        const hasPerm =
+          Array.isArray(u?.permissions) &&
+          u.permissions.some((p) =>
+            ['users:manage', 'users:view'].includes(String(p).toLowerCase())
+          );
+        const flag = !!u?.isAdmin;
+        if (mounted) {
+          setIsAdminUI(roleRaw === 'admin' || roleRaw === 'administrador' || hasPerm || flag);
+        }
+      } catch {
+        if (mounted) setIsAdminUI(false);
+      }
+    })();
+    return () => { mounted = false; };
   }, []);
 
   const isActive = (path) =>
@@ -46,7 +63,6 @@ const Sidebar = ({ menuOpen = false, setMenuOpen }) => {
 
   return (
     <>
-      {/* Backdrop móvil */}
       {menuOpen && (
         <button
           type="button"
@@ -59,11 +75,10 @@ const Sidebar = ({ menuOpen = false, setMenuOpen }) => {
 
       <aside
         className={[
-          // siempre fixed en desktop para ocupar 100% alto y dejar footer abajo
-          'fixed inset-y-0 left-0 w-64 z-50 sm:z-40',
+          // ancho: móvil se mantiene 16rem, desktop se estrecha a 14rem
+          'fixed inset-y-0 left-0 w-64 sm:w-56 z-50 sm:z-40',
           'bg-white border-r border-gray-200',
-          'flex flex-col h-[100dvh] p-4 sm:p-5',
-          // móvil: animación slide-in/out
+          'flex flex-col h-[100dvh] p-4',
           'transition-transform duration-200',
           menuOpen ? 'translate-x-0' : '-translate-x-full sm:translate-x-0',
         ].join(' ')}
@@ -112,7 +127,7 @@ const Sidebar = ({ menuOpen = false, setMenuOpen }) => {
           )}
         </nav>
 
-        {/* Footer (siempre pegado abajo en desktop) */}
+        {/* Footer */}
         <div className="pt-5">
           <div className="rounded-lg bg-[#000000] text-white text-xs px-3 py-2 font-medium shadow-sm">
             <div className="text-[11px] uppercase tracking-wide opacity-80 mb-0.5">

@@ -35,3 +35,9 @@ yarn-error.log*
 
 # npm lockfile
 package-lock.json
+
+# local/dev extras
+cookies.txt
+public/uploads/
+proyecto.zip
+.env.sanitized

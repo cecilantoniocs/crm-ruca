@@ -2,6 +2,7 @@
 import '../styles/globals.css';
 import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
+import axiosClient from '../config/axios';
 
 const PUBLIC_ROUTES = ['/login']; // agrega aquí rutas públicas extra si tuvieras
 
@@ -54,6 +55,47 @@ function AuthGuard({ children }) {
 }
 
 export default function App({ Component, pageProps }) {
+  // Ping de actividad (last_seen_at) cada 60s cuando la pestaña está visible
+  useEffect(() => {
+    let timer;
+
+    const ping = () => {
+      try {
+        const isAuth = localStorage.getItem('isAuth') === 'true';
+        if (!isAuth) return;
+        axiosClient.post('auth/ping', {
+          path: typeof window !== 'undefined' ? window.location.pathname : '',
+        }).catch(() => {});
+      } catch {
+        // no-op
+      }
+    };
+
+    const start = () => {
+      ping(); // ping inicial
+      timer = setInterval(() => {
+        if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+          ping();
+        }
+      }, 60_000);
+    };
+
+    const onFocus = () => ping();
+    const onVis = () => {
+      if (document.visibilityState === 'visible') ping();
+    };
+
+    start();
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVis);
+
+    return () => {
+      if (timer) clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, []);
+
   return (
     <AuthGuard>
       <Component {...pageProps} />

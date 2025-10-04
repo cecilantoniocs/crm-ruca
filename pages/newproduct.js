@@ -61,8 +61,8 @@ const NewProduct = () => {
         setIsSubmitting(true);
         const newProduct = {
           ...values,
-          cost: Number(values.cost),
-          imageUrl,
+          cost: values.cost === '' ? null : Number(values.cost),
+          imageUrl, // URL pública devuelta por /api/upload
         };
         await axiosClient.post('products', newProduct);
         await Swal.fire('Éxito', 'Producto creado correctamente', 'success');
@@ -84,14 +84,13 @@ const NewProduct = () => {
     formData.append('file', file);
 
     try {
-      const res = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
+      // Subir a Supabase Storage vía API (bucket product-images / carpeta products)
+      const { data } = await axiosClient.post('upload?folder=products', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
-      const data = await res.json();
-      if (data?.success) {
-        setImageUrl(data.filePath);
-        Swal.fire('Imagen subida', 'La imagen fue cargada correctamente', 'success');
+      if (data?.success && data?.publicUrl) {
+        setImageUrl(data.publicUrl);
+        await Swal.fire('Imagen subida', 'La imagen fue cargada correctamente', 'success');
       } else {
         throw new Error(data?.error || 'Error en la subida');
       }
@@ -152,7 +151,7 @@ const NewProduct = () => {
               <InputField formik={formik} id="weight" label="Peso (ej: 2.5 kg)" />
             </div>
 
-            {/* Fotografía con botones dinámicos */}
+            {/* Fotografía con botones dinámicos (Supabase Storage) */}
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-coffee mb-2">Fotografía</label>
 

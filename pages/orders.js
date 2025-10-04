@@ -30,9 +30,9 @@ const StatusBadge = ({ value }) => {
   const v = statusToString(value);
   const labelMap = { pendiente: 'Pendiente', entregado: 'Entregado', cancelado: 'Cancelado' };
   const styleMap = {
-    pendiente: 'bg-amber-50 text-amber-700 ring-amber-200',
+    pendiente: 'bg-rose-50 text-rose-700 ring-rose-200',
     entregado: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-    cancelado: 'bg-rose-50 text-rose-700 ring-rose-200',
+    cancelado: 'bg-amber-50 text-amber-700 ring-amber-200',
   };
   const cls = styleMap[v] || 'bg-gray-50 text-coffee ring-gray-200';
   const label = labelMap[v] || (typeof value === 'string' ? value : '—');
@@ -61,6 +61,16 @@ const PaymentBadge = ({ value }) => {
       {label}
     </span>
   );
+};
+
+// Formatear YYYY-MM-DD sin crear Date (evita desfase -1 día)
+const fmtDateYMD = (iso) => {
+  if (!iso) return '—';
+  const s = String(iso).slice(0, 10);
+  const [yyyy, mm, dd] = s.split('-').map(Number);
+  if (!yyyy || !mm || !dd) return '—';
+  const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  return `${dd} ${meses[mm - 1]} ${yyyy}`;
 };
 
 export default function Orders() {
@@ -124,13 +134,14 @@ export default function Orders() {
           setClients([]);
         }
 
-        const resU = await axiosClient.get('users'); // /api/users
-        setCouriers((resU?.data ?? []).filter((u) => !!u.canDeliver));
+        // ⚠️ obtenemos repartidores desde /api/couriers
+        const resCour = await axiosClient.get('couriers');
+        setCouriers(resCour?.data ?? []);
       } catch (e) {
         console.error(e);
         setLoadError('Error al cargar pedidos o clientes.');
       } finally {
-        setLoading(false);
+               setLoading(false);
       }
     })();
   }, []);
@@ -150,15 +161,6 @@ export default function Orders() {
   }, [couriers]);
 
   const CLP = useMemo(() => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }), []);
-  const fmtDate = (iso) => {
-    if (!iso) return '—';
-    try {
-      const d = new Date(iso);
-      return new Intl.DateTimeFormat('es-CL', { year: 'numeric', month: 'short', day: '2-digit' }).format(d);
-    } catch {
-      return '—';
-    }
-  };
 
   const mapsUrl = (addr) =>
     `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr || '')}`;
@@ -289,6 +291,9 @@ export default function Orders() {
         : 'text-gray-600 hover:text-coffee'
     }`;
 
+  // helper: ¿dirección "larga"?
+  const isLongAddress = (s) => (s || '').trim().length > 20;
+
   return (
     <Layout>
       {/* Header */}
@@ -374,9 +379,9 @@ export default function Orders() {
                   <p className="text-sm text-gray-600">{o.clientLocal || '—'}</p>
                 </div>
 
-                {/* Dirección + GPS */}
-                <div className="mt-2 flex items-center justify-between">
-                  <p className="text-sm text-coffee">
+                {/* Dirección + GPS (móvil) */}
+                <div className="mt-2 flex items-start gap-2">
+                  <p className="text-sm text-coffee flex-1">
                     <span className="font-medium text-coffee">Dirección: </span>
                     {addr || '—'}
                   </p>
@@ -386,7 +391,7 @@ export default function Orders() {
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={stop}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-50 text-brand-600 hover:bg-brand-100 border border-brand-200"
+                      className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-full bg-brand-50 text-brand-600 hover:bg-brand-100 border border-brand-200"
                       title="Abrir en Google Maps"
                       aria-label="Abrir en Google Maps"
                     >
@@ -399,7 +404,7 @@ export default function Orders() {
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <div className="text-sm text-coffee flex items-center gap-2">
                     <Calendar size={16} className="text-gray-400" />
-                    <span>{fmtDate(o.deliveryDate)}</span>
+                    <span>{fmtDateYMD(o.deliveryDate)}</span>
                   </div>
                   <div className="text-right">
                     <StatusBadge value={o.status} />
@@ -488,33 +493,51 @@ export default function Orders() {
                     const addr = c?.dir1 || '';
                     const items = o.items ?? [];
 
+                    const long = isLongAddress(addr);
+
                     return (
                       <React.Fragment key={o.id}>
                         <tr className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-colors`}>
                           <td className="px-6 py-3 text-sm text-coffee">{o.clientName || '—'}</td>
                           <td className="px-6 py-3 text-sm text-coffee">{o.clientLocal || '—'}</td>
 
-                          {/* Dirección + GPS */}
+                          {/* Dirección + GPS (≤20 centrado, >20 fuerza 2 líneas a 20ch) */}
                           <td className="px-6 py-3 text-sm text-coffee">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="truncate">{addr || '—'}</span>
+                            <div className={`inline-flex ${long ? 'items-start' : 'items-center'} gap-3`}>
+                              <span
+                                className={`block whitespace-normal break-words leading-tight ${long ? '' : ''}`}
+                                style={
+                                  long
+                                    ? {
+                                        width: '20ch',               // fuerza dos líneas para >20 chars
+                                        display: '-webkit-box',
+                                        WebkitLineClamp: 2,
+                                        WebkitBoxOrient: 'vertical',
+                                        overflow: 'hidden',
+                                      }
+                                    : {}
+                                }
+                                title={addr || '—'}
+                              >
+                                {addr || '—'}
+                              </span>
                               {addr && (
                                 <a
                                   href={mapsUrl(addr)}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   onClick={stop}
-                                  className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-full bg-brand-50 text-brand-600 hover:bg-brand-100 border border-brand-200"
+                                  className={`inline-flex ${long ? 'mt-0.5' : ''} h-7 w-7 items-center justify-center rounded-full bg-brand-50 text-brand-600 hover:bg-brand-100 border border-brand-200`}
                                   title="Abrir en Google Maps"
                                   aria-label="Abrir en Google Maps"
                                 >
-                                  <Navigation size={16} />
+                                  <Navigation size={14} />
                                 </a>
                               )}
                             </div>
                           </td>
 
-                          <td className="px-6 py-3 text-sm text-coffee">{fmtDate(o.deliveryDate)}</td>
+                          <td className="px-6 py-3 text-sm text-coffee">{fmtDateYMD(o.deliveryDate)}</td>
 
                           {/* Estado editable */}
                           <td className="px-6 py-3 text-sm relative" onClick={stop}>
@@ -651,15 +674,15 @@ export default function Orders() {
                           </td>
                         </tr>
 
-                        {/* Detalle */}
+                        {/* Detalle (SOLO ESCRITORIO: color más llamativo y legible) */}
                         <tr className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                           <td colSpan={10} className="px-6 pb-4">
-                            <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                            <div className="mt-1 rounded-lg border border-indigo-200 bg-indigo-50 p-4">
                               <h4 className="text-sm font-semibold text-coffee mb-2">Detalle de productos</h4>
                               <div className="overflow-x-auto">
                                 <table className="min-w-full">
                                   <thead>
-                                    <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
+                                    <tr className="text-left text-xs uppercase tracking-wide text-gray-600 border-b border-indigo-100">
                                       <th className="py-1 pr-4">Producto</th>
                                       <th className="py-1 pr-4">Cantidad</th>
                                       <th className="py-1 pr-4 text-right">Precio</th>
@@ -673,7 +696,7 @@ export default function Orders() {
                                       </tr>
                                     )}
                                     {(items ?? []).map((it, i) => (
-                                      <tr key={i} className="border-t border-gray-200">
+                                      <tr key={i} className="border-t border-indigo-100">
                                         <td className="py-1 pr-4">{it.name || 'Producto'}</td>
                                         <td className="py-1 pr-4">{it.qty}</td>
                                         <td className="py-1 pr-4 text-right">{CLP.format(Number(it.price) || 0)}</td>

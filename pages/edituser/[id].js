@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+// /pages/edituser/[id].js
+import React, { useEffect, useMemo, useState } from 'react';
 import Layout from '../../components/Layout';
 import { useRouter } from 'next/router';
 import { useFormik } from 'formik';
@@ -13,11 +14,55 @@ import {
 } from '../../helpers/permissions';
 
 const ROLE_OPTIONS = [
-  { value: 'admin', label: 'Admin' },
-  { value: 'vendedor', label: 'Vendedor' },
-  { value: 'repartidor', label: 'Repartidor' },
-  { value: 'supervisor', label: 'Supervisor' },
+  { value: 'admin',       label: 'Admin' },
+  { value: 'vendedor',    label: 'Vendedor' },
+  { value: 'supervisor',  label: 'Supervisor' },
+  { value: 'repartidor',  label: 'Repartidor' },
+  { value: 'produccion',  label: 'Producción' },
 ];
+
+/** Lista (['clients:read', ...]) -> objeto de toggles compatible con PERMISSIONS_SCHEMA */
+function listToPermsObject(list = []) {
+  const out = emptyPermissions();
+
+  const has = (k) => {
+    const norm = String(k || '').toLowerCase().replace(/\./g, ':');
+    return list.some((p) => String(p || '').toLowerCase().replace(/\./g, ':') === norm);
+  };
+
+  // clients
+  out.clients.view   = has('clients:read');
+  out.clients.create = has('clients:create');
+  out.clients.edit   = has('clients:update');
+  out.clients.delete = has('clients:delete');
+
+  // orders
+  out.orders.view          = has('orders:read');
+  out.orders.create        = has('orders:create');
+  out.orders.edit          = has('orders:update');
+  out.orders.delete        = has('orders:delete');
+  out.orders.markDelivered = has('orders:update');
+
+  // products
+  out.products.view   = has('products:read');
+  out.products.create = has('products:create');
+  out.products.edit   = has('products:update');
+  out.products.delete = has('products:delete');
+
+  // sales (ambos toggles mapean a sales:update)
+  const salesCanUpdate = has('sales:update');
+  out.sales.view         = has('sales:read') || salesCanUpdate;
+  out.sales.togglePaid   = salesCanUpdate;
+  out.sales.toggleInvoice= salesCanUpdate;
+
+  // users (admite ":" o ".")
+  out.users.view   = has('users:read');
+  out.users.create = has('users:create');
+  out.users.edit   = has('users:update');
+  out.users.delete = has('users:delete');
+
+  return out;
+}
 
 const EditUser = () => {
   const router = useRouter();
@@ -32,7 +77,7 @@ const EditUser = () => {
     (async () => {
       try {
         setLoading(true);
-        const res = await axiosClient.get(`users/${id}`);
+        const res = await axiosClient.get(`users/${id}`); // acepta uuid o email codificado
         setUser(res.data);
       } catch (e) {
         console.error(e);
@@ -44,22 +89,30 @@ const EditUser = () => {
     })();
   }, [id, router]);
 
+  const initialPerms = useMemo(() => {
+    if (!user) return templateForRole('vendedor');
+    if (Array.isArray(user.permissions) && user.permissions.length > 0) {
+      return listToPermsObject(user.permissions);
+    }
+    return templateForRole(user.role || 'vendedor');
+  }, [user]);
+
   const formik = useFormik({
     enableReinitialize: true,
     initialValues: {
       name: user?.name || '',
       email: user?.email || '',
-      role: user?.role || 'vendedor',
-      partnerTag: user?.partnerTag || '',
-      // cambio de contraseña opcional
+      role: (user?.role || 'vendedor').toLowerCase(),
+      partnerTag: user?.partner_tag || user?.partnerTag || '',
       newPassword: '',
       confirmPassword: '',
-      permissions: user?.perms || templateForRole(user?.role || 'vendedor'),
+      permissions: initialPerms,
+      canDeliver: !!(user?.can_deliver ?? user?.canDeliver),
     },
     validationSchema: Yup.object({
       name: Yup.string().required('El nombre es obligatorio'),
       email: Yup.string().email('Email inválido').required('El email es obligatorio'),
-      role: Yup.string().required('El rol es obligatorio'),
+      role: Yup.string().oneOf(ROLE_OPTIONS.map((r) => r.value)).required('El rol es obligatorio'),
       partnerTag: Yup.string().max(30, 'Máx 30 caracteres'),
       newPassword: Yup.string().min(4, 'Mínimo 4 caracteres').notRequired(),
       confirmPassword: Yup.string().oneOf(
@@ -73,9 +126,10 @@ const EditUser = () => {
         const patch = {
           name: values.name,
           email: values.email,
-          role: values.role,
+          role: values.role,                       // backend lo normaliza/valida
           partnerTag: values.partnerTag || '',
           perms: values.permissions || emptyPermissions(),
+          canDeliver: !!values.canDeliver,
         };
         if (values.newPassword?.trim()) {
           patch.password = values.newPassword.trim();
@@ -85,7 +139,7 @@ const EditUser = () => {
         router.push('/users');
       } catch (e) {
         console.error(e);
-        Swal.fire('Error', 'No se pudo actualizar el usuario.', 'error');
+        Swal.fire('Error', e?.response?.data?.error || 'No se pudo actualizar el usuario.', 'error');
       } finally {
         setSubmitting(false);
       }
@@ -96,6 +150,10 @@ const EditUser = () => {
     const newRole = e.target.value;
     formik.setFieldValue('role', newRole);
     formik.setFieldValue('permissions', templateForRole(newRole));
+    // Si es repartidor, forzamos canDeliver = true
+    if (newRole === 'repartidor') {
+      formik.setFieldValue('canDeliver', true);
+    }
   };
 
   const togglePerm = (mod, action) => {
@@ -208,13 +266,25 @@ const EditUser = () => {
               />
               {renderError('confirmPassword')}
             </div>
+
+            {/* Puede repartir */}
+            <div className="md:col-span-2">
+              <label className="inline-flex items-center gap-2 text-sm mt-2">
+                <input
+                  type="checkbox"
+                  checked={formik.values.canDeliver || false}
+                  onChange={(e) => formik.setFieldValue('canDeliver', e.target.checked)}
+                />
+                Puede repartir (aparece en “Repartidor asignado”)
+              </label>
+            </div>
           </div>
 
           {/* Permisos */}
           <div className="mt-6">
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-sm font-semibold text-coffee">Permisos</h2>
-              {permsDisabled && (
+              {formik.values.role === 'admin' && (
                 <span className="text-xs text-gray-500">
                   El rol <b>Admin</b> tiene todos los permisos.
                 </span>
@@ -228,19 +298,20 @@ const EditUser = () => {
                   <div className="flex flex-wrap gap-2">
                     {Object.entries(def.actions).map(([key, label]) => {
                       const checked = !!formik.values.permissions?.[mod]?.[key];
+                      const disabled = permsDisabled;
                       return (
                         <label
                           key={key}
                           className={`inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-xs ${
                             checked ? 'bg-brand-50 border-brand-200 text-brand-700' : 'bg-white border-gray-300 text-coffee'
-                          } ${permsDisabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:bg-gray-50'}`}
+                          } ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:bg-gray-50'}`}
                         >
                           <input
                             type="checkbox"
                             className="accent-indigo-600"
                             checked={checked}
-                            onChange={() => !permsDisabled && togglePerm(mod, key)}
-                            disabled={permsDisabled}
+                            onChange={() => !disabled && togglePerm(mod, key)}
+                            disabled={disabled}
                           />
                           {label}
                         </label>

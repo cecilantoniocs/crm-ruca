@@ -3,7 +3,31 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Layout from '../components/Layout';
 import { useRouter } from 'next/router';
 import axiosClient from '../config/axios';
-import { Search, UserPlus, MoreVertical, Trash2, Pencil, ShieldCheck } from 'lucide-react';
+import { Search, UserPlus, MoreVertical, Trash2, Pencil } from 'lucide-react';
+
+function timeAgoLabel(iso) {
+  if (!iso) return 'Nunca';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 0) return 'Ahora';
+  const s = Math.floor(ms / 1000);
+  if (s < 10) return 'Ahora';
+  if (s < 60) return `hace ${s} s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `hace ${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `hace ${h} h`;
+  const d = Math.floor(h / 24);
+  return d === 1 ? 'ayer' : `hace ${d} días`;
+}
+
+const OnlineDot = ({ online }) => (
+  <span
+    className={`inline-block h-2.5 w-2.5 rounded-full ${
+      online ? 'bg-emerald-500' : 'bg-gray-300'
+    }`}
+    aria-hidden="true"
+  />
+);
 
 export default function UsersPage() {
   const router = useRouter();
@@ -11,17 +35,25 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
-  const [roleFilter, setRoleFilter] = useState('all');
   const [openMenuId, setOpenMenuId] = useState(null);
 
+  // Cerrar menú ⋯ al hacer click fuera
+  useEffect(() => {
+    const close = () => setOpenMenuId(null);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, []);
+
+  // Cargar usuarios
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
         setLoadError('');
         const res = await axiosClient.get('users');
-        const list = (res?.data ?? []).filter(u => String(u.role || '').toLowerCase() !== 'client');
-        list.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'es', { sensitivity: 'base' }));
+        const list = (res?.data ?? [])
+          .filter((u) => String(u.role || '').toLowerCase() !== 'client')
+          .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'es', { sensitivity: 'base' }));
         setUsers(list);
       } catch (e) {
         console.error(e);
@@ -32,20 +64,21 @@ export default function UsersPage() {
     })();
   }, []);
 
+  // Sólo filtrar por texto (nombre/email)
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return users.filter(u => {
-      const okRole = roleFilter === 'all' || String(u.role || '').toLowerCase() === roleFilter;
-      const text = `${u.name || ''} ${u.email || ''} ${u.profileName || ''}`.toLowerCase();
-      return okRole && (!q || text.includes(q));
+    if (!q) return users;
+    return users.filter((u) => {
+      const text = `${u.name || ''} ${u.email || ''}`.toLowerCase();
+      return text.includes(q);
     });
-  }, [users, search, roleFilter]);
+  }, [users, search]);
 
   const handleDelete = async (id) => {
     if (!confirm('¿Eliminar este usuario?')) return;
     try {
       await axiosClient.delete(`users/${id}`);
-      setUsers(prev => prev.filter(u => u.id !== id));
+      setUsers((prev) => prev.filter((u) => u.id !== id));
     } catch (e) {
       console.error(e);
       alert('No se pudo eliminar.');
@@ -55,14 +88,21 @@ export default function UsersPage() {
   const RoleBadge = ({ role }) => {
     const r = String(role || '').toLowerCase();
     const map = {
-      admin: 'bg-gray-900 text-white',
-      repartidor: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-      vendedor: 'bg-brand-50 text-brand-700 ring-brand-200',
-      supervisor: 'bg-amber-50 text-amber-700 ring-amber-200',
+      admin: 'bg-gray-900 text-white ring-gray-900/10',
+      vendedor: 'bg-blue-50 text-blue-700 ring-blue-200',
+      repartidor: 'bg-yellow-50 text-yellow-700 ring-yellow-200',
+      supervisor: 'bg-red-50 text-red-700 ring-red-200',
+      produccion: 'bg-green-50 text-green-700 ring-green-200',
     };
     const cls = map[r] || 'bg-gray-50 text-coffee ring-gray-200';
-    return <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs ring-1 ${cls}`}>{role || '—'}</span>;
+    return (
+      <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs ring-1 ${cls}`}>
+        {role || '—'}
+      </span>
+    );
   };
+
+  const stop = (e) => e.stopPropagation();
 
   return (
     <Layout>
@@ -81,125 +121,197 @@ export default function UsersPage() {
         </button>
       </div>
 
-      {/* Filtros */}
-      <div className="mb-5 flex flex-col sm:flex-row sm:items-center gap-3">
+      {/* Buscador */}
+      <div className="mb-5">
         <div className="relative max-w-md w-full">
           <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
           <input
             type="text"
-            placeholder="Buscar por nombre, email o perfil…"
+            placeholder="Buscar por nombre o email…"
             className="pl-10 pr-4 py-2 w-full rounded-lg border border-gray-300 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-
-        <select
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
-          value={roleFilter}
-          onChange={(e) => setRoleFilter(e.target.value)}
-        >
-          <option value="all">Todos los roles</option>
-          <option value="admin">Admin</option>
-          <option value="vendedor">Vendedor</option>
-          <option value="repartidor">Repartidor</option>
-          <option value="supervisor">Supervisor</option>
-        </select>
       </div>
 
       {loading && <p className="text-gray-600">Cargando usuarios…</p>}
       {!loading && loadError && <p className="text-rose-600">{loadError}</p>}
-      {!loading && !loadError && filtered.length === 0 && <p className="text-gray-600">Sin usuarios.</p>}
+      {!loading && !loadError && filtered.length === 0 && (
+        <p className="text-gray-600">Sin usuarios.</p>
+      )}
 
-      {/* MOBILE: cards */}
+      {/* MOBILE: cards (⋯ arriba; rol abajo; estado visible) */}
       {!loading && filtered.length > 0 && (
         <div className="sm:hidden space-y-3">
-          {filtered.map((u) => (
-            <div key={u.id} className="relative bg-white rounded-xl shadow p-3 border border-gray-100">
-              <div className="flex items-start justify-between">
-                <div>
-                  <h3 className="text-base font-semibold text-coffee">{u.name || '—'}</h3>
-                  <p className="text-sm text-gray-600">{u.email || '—'}</p>
-                  <p className="text-xs text-gray-500 mt-1">Perfil: <span className="font-medium">{u.profileName || '—'}</span></p>
+          {filtered.map((u, idx) => {
+            const isLast = idx === filtered.length - 1;
+            const lastLabel = timeAgoLabel(u.last_seen_at);
+            return (
+              <div
+                key={u.id}
+                className="relative bg-white rounded-xl shadow p-3 border border-gray-100"
+                onClick={stop}
+              >
+                {/* Fila superior: título + menú ⋯ */}
+                <div className="flex items-start justify-between">
+                  <div className="pr-10">
+                    <h3 className="text-base font-semibold text-coffee">{u.name || '—'}</h3>
+                    <p className="text-sm text-gray-600">{u.email || '—'}</p>
+                    <p className="text-xs text-gray-500 mt-1 flex items-center gap-2">
+                      <OnlineDot online={!!u.online} />
+                      <span>{u.online ? 'En línea' : `Visto ${lastLabel}`}</span>
+                    </p>
+                  </div>
+
+                  {/* Botón ⋯ */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 active:scale-95 transition text-gray-600"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenMenuId((v) => (v === u.id ? null : u.id));
+                      }}
+                      aria-label="Más opciones"
+                      title="Más opciones"
+                    >
+                      <MoreVertical size={18} />
+                    </button>
+
+                    {/* Menú flotante */}
+                    {openMenuId === u.id && (
+                      <div
+                        className={
+                          `absolute right-0 w-36 rounded-lg border border-gray-200 bg-white shadow-lg z-50 ` +
+                          (isLast ? 'bottom-9 top-auto origin-bottom-right' : 'top-9 origin-top-right')
+                        }
+                        onClick={stop}
+                      >
+                        <button
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                          onClick={() => {
+                            setOpenMenuId(null);
+                            router.push(`/edituser/${encodeURIComponent(u.email)}`);
+                          }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Pencil size={14} /> Editar
+                          </div>
+                        </button>
+                        <button
+                          className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
+                          onClick={() => {
+                            setOpenMenuId(null);
+                            handleDelete(u.id);
+                          }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Trash2 size={14} /> Eliminar
+                          </div>
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <RoleBadge role={u.role} />
-              </div>
 
-              <div className="mt-3 flex items-center gap-2">
-                <span className="inline-flex items-center gap-1 text-xs text-gray-600">
-                  <ShieldCheck size={14} className="text-gray-400" /> Permisos por módulo
-                </span>
+                {/* Rol abajo */}
+                <div className="mt-3">
+                  <RoleBadge role={u.role} />
+                </div>
               </div>
-
-              {/* acciones */}
-              <div className="mt-3 flex items-center gap-2">
-                <button
-                  onClick={() => router.push(`/edituser/${u.id}`)}
-                  className="inline-flex h-8 px-3 items-center justify-center rounded-lg bg-brand-600 text-white text-xs hover:bg-brand-700 active:scale-95"
-                >
-                  <Pencil size={14} className="mr-1" /> Editar
-                </button>
-                <button
-                  onClick={() => handleDelete(u.id)}
-                  className="inline-flex h-8 px-3 items-center justify-center rounded-lg bg-rose-600 text-white text-xs hover:bg-rose-700 active:scale-95"
-                >
-                  <Trash2 size={14} className="mr-1" /> Eliminar
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      {/* DESKTOP: tabla */}
+      {/* DESKTOP: tabla (Estado en vez de “Perfil”) */}
       {!loading && filtered.length > 0 && (
         <div className="hidden sm:block">
-          <div className="rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="relative rounded-xl border border-gray-200 shadow-sm overflow-visible">
             <table className="min-w-full">
               <thead className="bg-gray-50 sticky top-0 z-10">
                 <tr className="text-left">
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Nombre</th>
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Email</th>
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Perfil</th>
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Rol</th>
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-center">Acciones</th>
+                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
+                    Nombre
+                  </th>
+                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
+                    Email
+                  </th>
+                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
+                    Estado
+                  </th>
+                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
+                    Rol
+                  </th>
+                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-center">
+                    Acciones
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {filtered.map((u, idx) => (
-                  <tr key={u.id} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100`}>
-                    <td className="px-6 py-3 text-sm text-coffee">{u.name || '—'}</td>
-                    <td className="px-6 py-3 text-sm text-coffee">{u.email || '—'}</td>
-                    <td className="px-6 py-3 text-sm text-coffee">{u.profileName || '—'}</td>
-                    <td className="px-6 py-3 text-sm"><RoleBadge role={u.role} /></td>
-                    <td className="px-6 py-3 text-sm">
-                      <div className="relative flex items-center justify-center">
-                        <button
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 text-gray-600"
-                          onClick={() => setOpenMenuId(v => v === u.id ? null : u.id)}
-                        >
-                          <MoreVertical size={16} />
-                        </button>
-                        {openMenuId === u.id && (
-                          <div className="absolute right-0 top-9 w-40 rounded-lg border border-gray-200 bg-white shadow-lg z-50">
-                            <button
-                              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                              onClick={() => router.push(`/edituser/${u.id}`)}
+                {filtered.map((u, idx) => {
+                  const isLast = idx === filtered.length - 1;
+                  const lastLabel = timeAgoLabel(u.last_seen_at);
+                  return (
+                    <tr
+                      key={u.id}
+                      className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-colors`}
+                    >
+                      <td className="px-6 py-3 text-sm text-coffee">{u.name || '—'}</td>
+                      <td className="px-6 py-3 text-sm text-coffee">{u.email || '—'}</td>
+                      <td className="px-6 py-3 text-sm text-coffee">
+                        <span className="inline-flex items-center gap-2">
+                          <OnlineDot online={!!u.online} />
+                          <span>{u.online ? 'En línea' : `Visto ${lastLabel}`}</span>
+                        </span>
+                      </td>
+                      <td className="px-6 py-3 text-sm">
+                        <RoleBadge role={u.role} />
+                      </td>
+                      <td className="px-6 py-3 text-sm">
+                        <div className="relative flex items-center justify-center" onClick={stop}>
+                          <button
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 text-gray-600"
+                            onClick={() => setOpenMenuId((v) => (v === u.id ? null : u.id))}
+                            aria-label="Más opciones"
+                            title="Más opciones"
+                          >
+                            <MoreVertical size={16} />
+                          </button>
+
+                          {openMenuId === u.id && (
+                            <div
+                              className={
+                                `absolute right-0 w-40 rounded-lg border border-gray-200 bg-white shadow-lg z-50 ` +
+                                (isLast ? 'bottom-9 top-auto origin-bottom-right' : 'top-9 origin-top-right')
+                              }
                             >
-                              <div className="flex items-center gap-2"><Pencil size={14} /> Editar</div>
-                            </button>
-                            <button
-                              className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
-                              onClick={() => handleDelete(u.id)}
-                            >
-                              <div className="flex items-center gap-2"><Trash2 size={14} /> Eliminar</div>
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                              <button
+                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                                onClick={() =>
+                                  router.push(`/edituser/${encodeURIComponent(u.email)}`)
+                                }
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Pencil size={14} /> Editar
+                                </div>
+                              </button>
+                              <button
+                                className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
+                                onClick={() => handleDelete(u.id)}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Trash2 size={14} /> Eliminar
+                                </div>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

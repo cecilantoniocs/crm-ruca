@@ -1,10 +1,26 @@
 // /pages/api/sales/index.js
 import { supabaseServer } from '@/lib/supabaseServer';
+import { getReqUser, requirePerm } from '@/server/guard';
+
+function startOfDayISO(d) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x.toISOString();
+}
+function nextDayISO(d) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  x.setDate(x.getDate() + 1);
+  return x.toISOString();
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).end();
+  const user = getReqUser(req);
 
   try {
+    requirePerm(user, 'sales.read');
+
     const { q, from, to, partnerId, courierId } = req.query;
 
     let query = supabaseServer
@@ -17,6 +33,7 @@ export default async function handler(req, res) {
           id, product_id, name, sku, image_url, qty, price, subtotal
         )
       `)
+      // En tu DB el estado entregado es 'entregado'
       .eq('status', 'entregado')
       .order('delivered_at', { ascending: false })
       .order('delivery_date', { ascending: false });
@@ -27,14 +44,15 @@ export default async function handler(req, res) {
       query = query.or(`client_name.ilike.${s},client_local.ilike.${s}`);
     }
 
-    // Rango de fechas (preferimos delivered_at, fallback delivery_date)
+    // Rango de fechas (preferimos delivered_at; también limitamos delivery_date para respaldo)
     if (from) {
-      query = query.gte('delivered_at', from).gte('delivery_date', from);
+      const f = startOfDayISO(from);
+      query = query.gte('delivered_at', f).gte('delivery_date', f);
     }
     if (to) {
-      const toDate = new Date(to);
-      toDate.setDate(toDate.getDate() + 1); // incluir el día "to"
-      query = query.lt('delivered_at', toDate.toISOString()).lte('delivery_date', to);
+      // inclusivo del día 'to' usando < a medianoche del día siguiente
+      const tNext = nextDayISO(to);
+      query = query.lt('delivered_at', tNext).lt('delivery_date', tNext);
     }
 
     if (partnerId) query = query.eq('seller_id', partnerId);
@@ -43,7 +61,6 @@ export default async function handler(req, res) {
     const { data, error } = await query;
     if (error) throw error;
 
-    // Normalizamos a camelCase para el front actual
     const rows = (data || []).map((o) => ({
       id: o.id,
       clientId: o.client_id,
@@ -66,6 +83,6 @@ export default async function handler(req, res) {
     res.json(rows);
   } catch (e) {
     console.error('GET /api/sales', e);
-    res.status(500).json({ error: e.message });
+    res.status(e.status || 500).json({ error: e.msg || e.message || 'Error' });
   }
 }
