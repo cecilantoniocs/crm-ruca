@@ -1,5 +1,5 @@
 // pages/orders.js
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { useRouter } from 'next/router';
 import axiosClient from '../config/axios';
@@ -14,6 +14,10 @@ import {
   User,
 } from 'lucide-react';
 import { getCurrentSeller, getClients } from '../helpers';
+
+// ⬇️ Pull-to-refresh (window)
+import PullToRefreshHeader from '../components/PullToRefreshHeader';
+import usePullToRefreshWindow from '../hooks/usePullToRefreshWindow';
 
 // --- helpers ---
 const statusToString = (val) => {
@@ -92,7 +96,7 @@ export default function Orders() {
   const [openPaymentId, setOpenPaymentId] = useState(null); // cambiar pago
   const [openCourierId, setOpenCourierId] = useState(null); // cambiar repartidor
 
-  // Swipe mobile
+  // Swipe mobile (✅ una sola vez)
   const touchStart = useRef({});
   const [swipeX, setSwipeX] = useState({});
 
@@ -114,37 +118,40 @@ export default function Orders() {
     return () => window.removeEventListener('click', close);
   }, []);
 
-  // cargar pedidos + clientes + couriers
-  useEffect(() => {
-    (async () => {
-      try {
-        setLoading(true);
-        setLoadError('');
+  // ✅ Refetch unificado (misma lógica que tu carga inicial)
+  const refetch = useCallback(async () => {
+    try {
+      setLoading(true);
+      setLoadError('');
 
-        const resO = await axiosClient.get('orders');
-        const list = resO?.data ?? [];
-        list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-        setOrders(list);
+      const resO = await axiosClient.get('orders');
+      const list = resO?.data ?? [];
+      list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      setOrders(list);
 
-        const seller = getCurrentSeller?.();
-        if (seller?.id) {
-          const resC = await getClients(seller.id);
-          setClients(resC?.data ?? []);
-        } else {
-          setClients([]);
-        }
-
-        // ⚠️ obtenemos repartidores desde /api/couriers
-        const resCour = await axiosClient.get('couriers');
-        setCouriers(resCour?.data ?? []);
-      } catch (e) {
-        console.error(e);
-        setLoadError('Error al cargar pedidos o clientes.');
-      } finally {
-               setLoading(false);
+      const seller = getCurrentSeller?.();
+      if (seller?.id) {
+        const resC = await getClients(seller.id);
+        setClients(resC?.data ?? []);
+      } else {
+        setClients([]);
       }
-    })();
+
+      // ⚠️ obtenemos repartidores desde /api/couriers
+      const resCour = await axiosClient.get('couriers');
+      setCouriers(resCour?.data ?? []);
+    } catch (e) {
+      console.error(e);
+      setLoadError('Error al cargar pedidos o clientes.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  // Carga inicial
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
 
   // mapa de cliente por id
   const clientMap = useMemo(() => {
@@ -294,8 +301,14 @@ export default function Orders() {
   // helper: ¿dirección "larga"?
   const isLongAddress = (s) => (s || '').trim().length > 20;
 
+  // ⬇️ Hook pull-to-refresh acoplado a window
+  const { headerProps } = usePullToRefreshWindow({ onRefresh: refetch, threshold: 60 });
+
   return (
     <Layout>
+      {/* Header de Pull-To-Refresh pegado arriba */}
+      <PullToRefreshHeader {...headerProps} />
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
         <h1 className="text-3xl font-bold text-coffee tracking-tight">
@@ -493,7 +506,7 @@ export default function Orders() {
                     const addr = c?.dir1 || '';
                     const items = o.items ?? [];
 
-                    const long = isLongAddress(addr);
+                    const long = (addr || '').trim().length > 20;
 
                     return (
                       <React.Fragment key={o.id}>
@@ -501,15 +514,15 @@ export default function Orders() {
                           <td className="px-6 py-3 text-sm text-coffee">{o.clientName || '—'}</td>
                           <td className="px-6 py-3 text-sm text-coffee">{o.clientLocal || '—'}</td>
 
-                          {/* Dirección + GPS (≤20 centrado, >20 fuerza 2 líneas a 20ch) */}
+                          {/* Dirección + GPS */}
                           <td className="px-6 py-3 text-sm text-coffee">
                             <div className={`inline-flex ${long ? 'items-start' : 'items-center'} gap-3`}>
                               <span
-                                className={`block whitespace-normal break-words leading-tight ${long ? '' : ''}`}
+                                className="block whitespace-normal break-words leading-tight"
                                 style={
                                   long
                                     ? {
-                                        width: '20ch',               // fuerza dos líneas para >20 chars
+                                        width: '20ch',
                                         display: '-webkit-box',
                                         WebkitLineClamp: 2,
                                         WebkitBoxOrient: 'vertical',
@@ -674,7 +687,7 @@ export default function Orders() {
                           </td>
                         </tr>
 
-                        {/* Detalle (SOLO ESCRITORIO: color más llamativo y legible) */}
+                        {/* Detalle (SOLO ESCRITORIO) */}
                         <tr className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                           <td colSpan={10} className="px-6 pb-4">
                             <div className="mt-1 rounded-lg border border-indigo-200 bg-indigo-50 p-4">

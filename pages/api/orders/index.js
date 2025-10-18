@@ -8,6 +8,14 @@ function startOfDayISO(d) { const x = new Date(d); x.setHours(0,0,0,0); return x
 function nextDayISO(d)    { const x = new Date(d); x.setHours(0,0,0,0); x.setDate(x.getDate()+1); return x.toISOString(); }
 const STATUSES = ['pendiente','entregado'];
 
+// ---------- Payment method (normalización y whitelist) ----------
+const ALLOWED_PM = new Set(['efectivo', 'transferencia', 'cheque']);
+const normPM = (v) => {
+  if (v == null || v === '') return null;
+  const s = String(v).trim().toLowerCase();
+  return ALLOWED_PM.has(s) ? s : null;
+};
+
 // ---------- Schemas ----------
 const getQuerySchema = z.object({
   q: z.string().optional().nullable(),
@@ -48,7 +56,8 @@ const postBodySchema = z.object({
     if (!DATE_RE.test(s)) throw new Error('delivery_date debe ser YYYY-MM-DD');
     return s;
   }),
-  payment_method: z.string().optional().nullable(),
+  // aceptamos cualquier input y lo normalizamos a null | 'efectivo' | 'transferencia' | 'cheque'
+  payment_method: z.any().transform(normPM).optional().nullable(),
   invoice: z.boolean().optional().nullable(),
   invoice_sent: z.boolean().optional().nullable(),
   paid: z.boolean().optional().nullable(),
@@ -156,7 +165,7 @@ export default async function handler(req, res) {
         status: body.status,
         delivery_date: body.delivery_date, // YYYY-MM-DD o null
         delivered_at: body.status === 'entregado' ? new Date().toISOString() : null,
-        payment_method: body.payment_method ?? null,
+        payment_method: body.payment_method, // 👈 ya viene normalizado por zod->normPM
         invoice: body.invoice ?? false,
         invoice_sent: body.invoice_sent ?? false,
         paid: body.paid ?? false,

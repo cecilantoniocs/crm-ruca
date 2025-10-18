@@ -14,6 +14,7 @@ function mapRow(p) {
     weight: p.weight ?? null,    // text
     imageUrl: p.image_url || null,
     createdAt: p.created_at,
+    sortOrder: p.sort_order ?? 1000,
   };
 }
 
@@ -38,7 +39,7 @@ const patchSchema = z.object({
     const s = String(v).trim();
     return s === '' ? null : s;
   }),
-  // imageUrl: aceptar string cualquiera o vacío; "" => null; no exigir formato URL
+  // imageUrl: aceptar string cualquiera o vacío; "" => null
   imageUrl: z
     .union([z.string(), z.null()])
     .optional()
@@ -47,6 +48,16 @@ const patchSchema = z.object({
       if (v === null) return null;                    // explícito null
       const s = String(v).trim();
       return s === '' ? null : s;                     // vacío -> null
+    }),
+  // ✅ nuevo: sortOrder entero no negativo
+  sortOrder: z
+    .union([z.number(), z.string()])
+    .optional()
+    .transform((v) => {
+      if (v === undefined || v === null || v === '') return undefined;
+      const n = Number(v);
+      if (!Number.isInteger(n) || n < 0) throw new Error('sortOrder inválido');
+      return n;
     }),
 }).refine((val) => Object.keys(val).length > 0, { message: 'Sin cambios' });
 
@@ -62,7 +73,7 @@ export default async function handler(req, res) {
 
       const { data, error } = await supabaseServer
         .from('products')
-        .select('id,name,sku,category,cost,weight,image_url,created_at')
+        .select('id,name,sku,category,cost,weight,image_url,created_at,sort_order')
         .eq('id', id)
         .maybeSingle();
 
@@ -79,7 +90,7 @@ export default async function handler(req, res) {
       requirePerm(user, 'products.update');
 
       const body = patchSchema.parse(req.body || {});
-      // DB espera snake_case para image_url
+      // DB espera snake_case
       const patch = {
         ...(body.name !== undefined ? { name: body.name } : {}),
         ...(body.sku !== undefined ? { sku: body.sku } : {}),
@@ -87,13 +98,14 @@ export default async function handler(req, res) {
         ...(body.cost !== undefined ? { cost: body.cost } : {}),
         ...(body.weight !== undefined ? { weight: body.weight } : {}),
         ...(body.imageUrl !== undefined ? { image_url: body.imageUrl } : {}),
+        ...(body.sortOrder !== undefined ? { sort_order: body.sortOrder } : {}),
       };
 
       const { data, error } = await supabaseServer
         .from('products')
         .update(patch)
         .eq('id', id)
-        .select('id,name,sku,category,cost,weight,image_url,created_at')
+        .select('id,name,sku,category,cost,weight,image_url,created_at,sort_order')
         .maybeSingle();
 
       if (error) {

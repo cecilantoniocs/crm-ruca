@@ -3,6 +3,14 @@ import { supabaseServer } from '@/lib/supabaseServer';
 import { getReqUser, requirePerm } from '@/server/guard';
 import { z } from 'zod';
 
+// ---------- Payment method (normalización y whitelist) ----------
+const ALLOWED_PM = new Set(['efectivo', 'transferencia', 'cheque']);
+const normPM = (v) => {
+  if (v == null || v === '') return null;
+  const s = String(v).trim().toLowerCase();
+  return ALLOWED_PM.has(s) ? s : null;
+};
+
 // ---------- Helpers de mapeo ----------
 const toCamel = (row) => ({
   id: row.id,
@@ -50,7 +58,13 @@ const partialFromCamel = (o) => {
   if ('total' in o) r.total = toIntOrNull(o.total);
   if ('deliveryDate' in o || 'delivery_date' in o) r.delivery_date = o.deliveryDate ?? o.delivery_date;
   if ('deliveredAt' in o || 'delivered_at' in o) r.delivered_at = o.deliveredAt ?? o.delivered_at;
-  if ('paymentMethod' in o || 'payment_method' in o) r.payment_method = o.paymentMethod ?? o.payment_method;
+
+  // 👇 normalizamos payment_method sin importar camel/snake ni casing
+  if ('paymentMethod' in o || 'payment_method' in o) {
+    const raw = o.paymentMethod ?? o.payment_method;
+    r.payment_method = normPM(raw);
+  }
+
   if ('invoice' in o) r.invoice = !!o.invoice;
   if ('invoiceSent' in o || 'invoice_sent' in o) r.invoice_sent = !!(o.invoiceSent ?? o.invoice_sent);
   if ('paid' in o) r.paid = !!o.paid;
@@ -103,8 +117,11 @@ const patchSchema = z.object({
     .refine((v) => !v || DATE_RE.test(v), { message: 'delivery_date debe ser YYYY-MM-DD' }),
   deliveredAt: z.string().datetime().optional(),
   delivered_at: z.string().datetime().optional(),
+
+  // dejamos string libre y normalizamos después en partialFromCamel
   paymentMethod: z.string().optional(),
   payment_method: z.string().optional(),
+
   invoice: z.boolean().optional(),
   invoiceSent: z.boolean().optional(),
   invoice_sent: z.boolean().optional(),

@@ -1,5 +1,5 @@
 // pages/sales.js
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { useRouter } from 'next/router';
 import axiosClient from '../config/axios';
@@ -11,6 +11,10 @@ import {
   Truck,
   Users as UsersIcon,
 } from 'lucide-react';
+
+// ⬇️ Pull-to-refresh (window)
+import PullToRefreshHeader from '../components/PullToRefreshHeader';
+import usePullToRefreshWindow from '../hooks/usePullToRefreshWindow';
 
 // ---- utils ----
 const norm = (v) => (v ?? '').toString().trim().toLowerCase();
@@ -87,30 +91,33 @@ const SalesPage = () => {
 
   const oDate = (o) => o.deliveredAt || o.deliveryDate || o.createdAt || '';
 
+  // ✅ Refetch unificado (misma lógica que tenías)
+  const refetch = useCallback(async () => {
+    try {
+      setLoading(true);
+      setLoadError('');
+
+      const [resO, resC, resU] = await Promise.all([
+        axiosClient.get('sales'),
+        axiosClient.get('clients'),
+        axiosClient.get('users'),
+      ]);
+
+      setOrders(resO?.data ?? []);
+      setClients(resC?.data ?? []);
+      setUsers(resU?.data ?? []);
+    } catch (e) {
+      console.error(e);
+      setLoadError('Error al cargar ventas.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   // Cargar
   useEffect(() => {
-    (async () => {
-      try {
-        setLoading(true);
-        setLoadError('');
-
-        const [resO, resC, resU] = await Promise.all([
-          axiosClient.get('sales'),
-          axiosClient.get('clients'),
-          axiosClient.get('users'),
-        ]);
-
-        setOrders(resO?.data ?? []);
-        setClients(resC?.data ?? []);
-        setUsers(resU?.data ?? []);
-      } catch (e) {
-        console.error(e);
-        setLoadError('Error al cargar ventas.');
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
+    refetch();
+  }, [refetch]);
 
   // Maps
   const clientMap = useMemo(() => {
@@ -316,8 +323,14 @@ const SalesPage = () => {
     return `${pillCls} ${color} ${sizing}`;
   };
 
+  // ⬇️ Hook pull-to-refresh acoplado a window
+  const { headerProps } = usePullToRefreshWindow({ onRefresh: refetch, threshold: 60 });
+
   return (
     <Layout>
+      {/* Header de Pull-To-Refresh pegado arriba */}
+      <PullToRefreshHeader {...headerProps} />
+
       {/* Header + KPIs */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
         <h1 className="text-3xl font-bold text-coffee-900 tracking-tight">

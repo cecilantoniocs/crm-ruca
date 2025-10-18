@@ -1,18 +1,39 @@
 // pages/login.js
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useFormik } from 'formik';
 import * as Yup from 'yup';
 import { useRouter } from 'next/router';
 import Image from 'next/image';
 import axios from 'axios';
 
-const logoUrl =
-  process.env.NEXT_PUBLIC_BRAND_LOGO_URL || '/brand/rucapellan-logo.png';
+// Candidatos en orden de preferencia:
+// 1) URL de entorno (remoto o local)
+// 2) el que ya usabas antes
+// 3) el nuevo sugerido
+// 4) último fallback (apple icon / favicon)
+const makeCandidates = () => [
+  process.env.NEXT_PUBLIC_BRAND_LOGO_URL || null,
+  '/brand/rucapellan-logo.png',
+  '/brand/login-logo.png',
+  '/apple-touch-icon.png',
+  '/favicon-32x32.png',
+].filter(Boolean);
 
 export default function LoginPage() {
   const router = useRouter();
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const CANDIDATES = useMemo(makeCandidates, []);
+  const [logoSrc, setLogoSrc] = useState(CANDIDATES[0]);
+
+  const handleLogoError = () => {
+    setLogoSrc((prev) => {
+      const i = CANDIDATES.indexOf(prev);
+      const next = CANDIDATES[i + 1] || CANDIDATES[CANDIDATES.length - 1];
+      return next;
+    });
+  };
 
   // Si ya hay sesión, redirige fuera del login
   useEffect(() => {
@@ -74,12 +95,15 @@ export default function LoginPage() {
             <div className="flex flex-col items-center text-center">
               <div className="mb-4">
                 <Image
-                  src={logoUrl}
+                  src={logoSrc}
                   alt="Rucapellán"
                   width={160}
                   height={160}
                   className="h-40 w-40 object-contain"
                   priority
+                  sizes="160px"
+                  fetchPriority="high"
+                  onError={handleLogoError}
                 />
               </div>
               <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-coffee">

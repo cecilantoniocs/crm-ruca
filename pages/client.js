@@ -1,9 +1,13 @@
 // pages/client.js
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { useRouter } from 'next/router';
 import axiosClient from '../config/axios';
 import { Phone, UserPlus, Search, MoreVertical, ShoppingCart } from 'lucide-react';
+
+// ⬇️ Pull-to-refresh (window)
+import PullToRefreshHeader from '../components/PullToRefreshHeader';
+import usePullToRefreshWindow from '../hooks/usePullToRefreshWindow';
 
 const pillCls = 'inline-flex items-center rounded-full ring-1 px-2 py-0.5 text-[11px] font-medium';
 
@@ -33,32 +37,35 @@ const ClientPage = () => {
     return () => window.removeEventListener('click', close);
   }, []);
 
-  // Cargar clientes (SIN ownerId). Solo mandamos params si el filtro NO es "all".
-  useEffect(() => {
-    (async () => {
-      try {
-        setLoading(true);
-        setLoadError('');
+  // ✅ Refetch unificado (misma lógica que tenías)
+  const refetch = useCallback(async () => {
+    try {
+      setLoading(true);
+      setLoadError('');
 
-        const params = {};
-        if (debounced) params.q = debounced;
-        if (ownerFilter !== 'all') params.clientOwner = ownerFilter;
-        if (typeFilter !== 'all')  params.type = typeFilter;
+      const params = {};
+      if (debounced) params.q = debounced;
+      if (ownerFilter !== 'all') params.clientOwner = ownerFilter;
+      if (typeFilter !== 'all')  params.type = typeFilter;
 
-        const res = await axiosClient.get('clients', { params });
-        const ordered = (res?.data ?? []).sort((a, b) =>
-          (a?.name || '').localeCompare(b?.name || '', 'es', { sensitivity: 'base' })
-        );
-        setClients(ordered);
-      } catch (err) {
-        console.error(err);
-        setLoadError('Error al cargar clientes.');
-        setClients([]);
-      } finally {
-        setLoading(false);
-      }
-    })();
+      const res = await axiosClient.get('clients', { params });
+      const ordered = (res?.data ?? []).sort((a, b) =>
+        (a?.name || '').localeCompare(b?.name || '', 'es', { sensitivity: 'base' })
+      );
+      setClients(ordered);
+    } catch (err) {
+      console.error(err);
+      setLoadError('Error al cargar clientes.');
+      setClients([]);
+    } finally {
+      setLoading(false);
+    }
   }, [debounced, ownerFilter, typeFilter]);
+
+  // Cargar clientes cuando cambian búsqueda/filtros
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
 
   const normalized = (c) => {
     const clientOwner = (c.clientOwner ?? c.client_owner ?? '').toString().toLowerCase();
@@ -113,22 +120,27 @@ const ClientPage = () => {
   };
 
   const ownerPill = (o) => {
-  const v = (o || '').toString().toLowerCase();
-  const label = v === 'cecil' ? 'Cecil' : v === 'rucapellan' ? 'Rucapellan' : '—';
+    const v = (o || '').toString().toLowerCase();
+    const label = v === 'cecil' ? 'Cecil' : v === 'rucapellan' ? 'Rucapellan' : '—';
 
-  const cls =
-    v === 'rucapellan'
-      ? 'bg-rose-50 text-rose-700 ring-rose-200'
-      : v === 'cecil'
-      ? 'bg-sky-50 text-sky-700 ring-sky-200'
-      : 'bg-gray-50 text-gray-700 ring-gray-200';
+    const cls =
+      v === 'rucapellan'
+        ? 'bg-rose-50 text-rose-700 ring-rose-200'
+        : v === 'cecil'
+        ? 'bg-sky-50 text-sky-700 ring-sky-200'
+        : 'bg-gray-50 text-gray-700 ring-gray-200';
 
-  return <span className={`${pillCls} ${cls}`}>{label}</span>;
+    return <span className={`${pillCls} ${cls}`}>{label}</span>;
   };
 
+  // ⬇️ Hook pull-to-refresh acoplado a window
+  const { headerProps } = usePullToRefreshWindow({ onRefresh: refetch, threshold: 60 });
 
   return (
     <Layout>
+      {/* Header de Pull-To-Refresh pegado arriba */}
+      <PullToRefreshHeader {...headerProps} />
+
       {/* Header + acciones */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
         <h1 className="text-3xl font-bold text-coffee-900 tracking-tight">

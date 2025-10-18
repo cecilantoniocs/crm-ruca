@@ -14,6 +14,7 @@ function mapRow(p) {
     weight: p.weight ?? null,      // text (o null)
     imageUrl: p.image_url || null,
     createdAt: p.created_at,
+    sortOrder: p.sort_order ?? 1000,
   };
 }
 
@@ -41,12 +42,12 @@ export default async function handler(req, res) {
       }
       const { q, sku, category } = parsed.data;
 
-      // OJO: solo pedimos columnas que existen
+      // ⚠️ incluir sort_order y ordenar por sort_order ASC, luego name ASC
       let query = supabaseServer
         .from('products')
-        .select('id,name,sku,category,cost,weight,image_url,created_at')
-        .order('name', { ascending: true })
-        .order('created_at', { ascending: false });
+        .select('id,name,sku,category,cost,weight,image_url,created_at,sort_order')
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true });
 
       if (sku) query = query.eq('sku', sku);
       if (category) query = query.eq('category', category);
@@ -88,12 +89,14 @@ export default async function handler(req, res) {
         weight: body.weight == null ? null : String(body.weight),
         // imageUrl flexible: '' -> null
         image_url: body.imageUrl ? String(body.imageUrl) : null,
+        // sort_order: dejar que use DEFAULT (1000) salvo que envíen explícito
+        ...(body.sortOrder != null ? { sort_order: Number(body.sortOrder) } : {}),
       };
 
       const { data, error } = await supabaseServer
         .from('products')
         .insert(insert)
-        .select('id,name,sku,category,cost,weight,image_url,created_at')
+        .select('id,name,sku,category,cost,weight,image_url,created_at,sort_order')
         .single();
 
       if (error) {

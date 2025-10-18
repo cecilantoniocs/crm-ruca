@@ -79,10 +79,18 @@ const NewOrder = () => {
         errors.push('clientes');
       }
 
-      // Productos
+      // Productos (respetar sort_order si viene; fallback por name)
       try {
         const resP = await axiosClient.get('products');
-        setProducts(resP?.data ?? []);
+        const list = resP?.data ?? [];
+        // Ordenar por sort_order ASC (si existe), luego por name
+        list.sort((a, b) => {
+          const sa = Number(a.sort_order ?? a.sortOrder ?? 1000);
+          const sb = Number(b.sort_order ?? b.sortOrder ?? 1000);
+          if (sa !== sb) return sa - sb;
+          return (a?.name || '').localeCompare(b?.name || '', 'es', { sensitivity: 'base' });
+        });
+        setProducts(list);
       } catch (e) {
         console.error('Error cargando productos:', e);
         errors.push('productos');
@@ -165,14 +173,6 @@ const NewOrder = () => {
 
   const updateItem = (id, patch) =>
     setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
-
-  const todayISO = () => {
-    const d = new Date();
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-  };
 
   const weekAgoISO = () => {
     const d = new Date();

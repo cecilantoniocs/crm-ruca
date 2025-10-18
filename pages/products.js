@@ -1,8 +1,10 @@
 // pages/products.js
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { useRouter } from 'next/router';
 import axiosClient from '../config/axios';
+import PullToRefreshHeader from '../components/PullToRefreshHeader';
+import usePullToRefreshWindow from '../hooks/usePullToRefreshWindow';
 import {
   Search,
   PackagePlus,
@@ -10,50 +12,88 @@ import {
   Trash2,
   Pencil,
   Image as ImageIcon,
+  RotateCcw,
+  GripVertical,
 } from 'lucide-react';
+
+// DnD Kit (solo para desktop)
+import {
+  DndContext,
+  closestCenter,
+  DragOverlay,
+  useSensor,
+  useSensors,
+  PointerSensor,
+  KeyboardSensor,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  useSortable,
+  arrayMove,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 export default function Products() {
   const router = useRouter();
   const [products, setProducts] = useState([]);
+  const [initialIds, setInitialIds] = useState([]); // para detectar cambios
   const [searchTerm, setSearchTerm] = useState('');
   const [debounced, setDebounced] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const [openMenuId, setOpenMenuId] = useState(null); // menú ⋯ abierto
+  const [openMenuId, setOpenMenuId] = useState(null); // menú ⋯
+  const [savingOrder, setSavingOrder] = useState(false);
 
-  // Debounce
+  // Modo reordenar (toggle único) — solo lo usamos en desktop
+  const [reorderMode, setReorderMode] = useState(false);
+
+  // DnD state (desktop)
+  const [activeId, setActiveId] = useState(null);
+
+  // Sensores DnD (desktop)
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor)
+  );
+
+  // Debounce search
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(searchTerm.trim().toLowerCase()), 300);
+    const t = setTimeout(() => setDebounced(searchTerm.trim().toLowerCase()), 280);
     return () => clearTimeout(t);
   }, [searchTerm]);
 
-  // Cerrar menú ⋯ al hacer click fuera
+  // Cerrar menú ⋯ al click fuera
   useEffect(() => {
     const close = () => setOpenMenuId(null);
     window.addEventListener('click', close);
     return () => window.removeEventListener('click', close);
   }, []);
 
-  // Cargar productos
-  useEffect(() => {
-    (async () => {
-      try {
-        setLoading(true);
-        setLoadError('');
-        const res = await axiosClient.get('products');
-        const ordered = (res?.data ?? []).sort((a, b) =>
-          (a?.name || '').localeCompare(b?.name || '', 'es', { sensitivity: 'base' })
-        );
-        setProducts(ordered);
-      } catch (err) {
-        console.error(err);
-        setLoadError('Error al cargar productos.');
-      } finally {
-        setLoading(false);
-      }
-    })();
+  // Refetch unificado (⚠️ NO reordenar en front)
+  const refetch = useCallback(async () => {
+    try {
+      setLoadError('');
+      const res = await axiosClient.get('products');
+      const list = res?.data ?? [];
+      setProducts(list);
+      setInitialIds(list.map((p) => p.id));
+    } catch (err) {
+      console.error(err);
+      setLoadError('Error al cargar productos.');
+      setProducts([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
+  // Carga inicial
+  useEffect(() => {
+    setLoading(true);
+    refetch();
+  }, [refetch]);
+
+  // filtro (respeta orden actual)
   const filtered = useMemo(() => {
     if (!debounced) return products;
     return products.filter((p) => {
@@ -66,17 +106,17 @@ export default function Products() {
 
   const stop = (e) => e.stopPropagation();
 
-    const handleDelete = async (id) => {
+  const handleDelete = async (id) => {
     const ok = window.confirm('¿Eliminar este producto? Esta acción no se puede deshacer.');
     if (!ok) return;
     try {
       await axiosClient.delete(`products/${id}`);
       setProducts((prev) => prev.filter((p) => p.id !== id));
+      setInitialIds((prev) => prev.filter((x) => x !== id));
     } catch (e) {
       console.error(e);
       const status = e?.response?.status;
       const msg = e?.response?.data?.error || 'No se pudo eliminar el producto.';
-
       if (status === 403) {
         alert('No tienes permiso para eliminar productos (products.delete).');
       } else if (status === 409) {
@@ -87,31 +127,176 @@ export default function Products() {
     }
   };
 
-
-  const handleEdit = (id) => {
-    // 🔧 ahora sí navega al editor
-    router.push(`/editproduct/${id}`);
-  };
+  const handleEdit = (id) => router.push(`/editproduct/${id}`);
 
   const CLP = new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' });
   const fmtCost = (c) => (c == null || c === '' || Number.isNaN(Number(c)) ? '—' : CLP.format(Number(c)));
   const getImg = (p) => p?.image_url || p?.imageUrl || null;
 
+  // PTR window
+  const { headerProps } = usePullToRefreshWindow({ onRefresh: refetch, threshold: 60 });
+
+  // ---- Detección de cambios en orden (desktop) ----
+  const idsNow = products.map((p) => p.id);
+  const dirty = useMemo(() => {
+    if (initialIds.length !== idsNow.length) return true;
+    for (let i = 0; i < idsNow.length; i++) {
+      if (idsNow[i] !== initialIds[i]) return true;
+    }
+    return false;
+  }, [initialIds, idsNow]);
+
+  // ---- Guardar / Deshacer (desktop) ----
+  const buildSortPayload = () =>
+    products.map((p, i) => ({ id: p.id, sort_order: (i + 1) * 10 }));
+
+  const saveOrder = async () => {
+    try {
+      setSavingOrder(true);
+      const payload = buildSortPayload();
+      await axiosClient.post('products/reorder', payload); // <-- POST (endpoint abajo)
+      await refetch();
+      setReorderMode(false);
+      alert('Orden guardado');
+    } catch (e) {
+      console.error(e);
+      const msg = e?.response?.data?.error || 'No se pudo guardar el orden.';
+      alert(msg);
+    } finally {
+      setSavingOrder(false);
+    }
+  };
+
+  const resetOrder = () => {
+    // vuelve al orden que vino del backend en el último refetch
+    setProducts((prev) => {
+      const map = new Map(prev.map((p) => [p.id, p]));
+      return initialIds.map((id) => map.get(id)).filter(Boolean);
+    });
+    setReorderMode(false);
+  };
+
+  // ---- Drag & Drop (desktop) ----
+  // Nota: sólo guardamos si NO hay búsqueda activa.
+  const reorderDisabled = Boolean(debounced);
+
+  const onDragStart = (event) => setActiveId(event.active.id);
+
+  const onDragEnd = (event) => {
+    const { active, over } = event;
+    setActiveId(null);
+    if (!over || active.id === over.id) return;
+
+    setProducts((prev) => {
+      const oldIndex = prev.findIndex((p) => p.id === active.id);
+      const newIndex = prev.findIndex((p) => p.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return prev;
+      return arrayMove(prev, oldIndex, newIndex);
+    });
+  };
+
+  // --- Sortable row (fila de desktop) ---
+  function SortableRow({ id, children }) {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      zIndex: isDragging ? 5 : undefined,
+      boxShadow: isDragging ? '0 6px 18px rgba(0,0,0,0.15)' : undefined,
+      background: isDragging ? 'var(--row-drag-bg, #fff)' : undefined,
+    };
+    return (
+      <tr ref={setNodeRef} style={style} {...attributes} className="hover:bg-gray-50">
+        {/* handle col */}
+        <td className="px-3 py-3 text-sm w-[52px]">
+          <button
+            type="button"
+            {...listeners}
+            disabled={!reorderMode || reorderDisabled}
+            className={`inline-flex h-8 w-8 items-center justify-center rounded ${
+              reorderMode && !reorderDisabled
+                ? 'bg-gray-100 hover:bg-gray-200 cursor-grab active:cursor-grabbing'
+                : 'bg-gray-50 text-gray-300 cursor-not-allowed'
+            }`}
+            title={reorderDisabled ? 'Desactiva el buscador para reordenar' : 'Arrastrar para reordenar'}
+          >
+            <GripVertical size={16} />
+          </button>
+        </td>
+        {children}
+      </tr>
+    );
+  }
+
+  // --- Click del botón único (desktop): Reordenar / Guardar ---
+  const onClickReorder = async () => {
+    if (!reorderMode) {
+      setReorderMode(true);
+      return;
+    }
+    // Estamos en modo reordenar -> en segundo click intentamos guardar
+    if (reorderDisabled) {
+      alert('Para guardar el nuevo orden, limpia el buscador primero.');
+      return;
+    }
+    if (!dirty) {
+      // No hay cambios: solo salimos
+      setReorderMode(false);
+      return;
+    }
+    if (savingOrder) return;
+    await saveOrder();
+  };
+
   return (
     <Layout>
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
+      {/* Header PTR pegado arriba del contenido. */}
+      <PullToRefreshHeader {...headerProps} />
+
+      {/* Header de página */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4">
         <h1 className="text-3xl font-bold text-coffee-900 tracking-tight">
           Maestro de <span className="text-brand-700">Productos</span>
         </h1>
 
-        <button
-          onClick={() => router.push('/newproduct')}
-          className="mt-3 sm:mt-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-600 text-white font-medium shadow hover:bg-brand-700 active:scale-95 transition"
-        >
-          <PackagePlus size={18} />
-          Nuevo Producto
-        </button>
+        <div className="mt-3 sm:mt-0 flex items-center gap-2">
+          <button
+            onClick={() => router.push('/newproduct')}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-600 text-white font-medium shadow hover:bg-brand-700 active:scale-95 transition"
+          >
+            <PackagePlus size={18} />
+            Nuevo Producto
+          </button>
+
+          {/* Botón único: Reordenar -> Guardar (solo desktop) */}
+          <button
+            type="button"
+            onClick={onClickReorder}
+            className={`hidden sm:inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition ${
+              reorderMode
+                ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                : 'bg-white text-gray-700 hover:bg-gray-50'
+            }`}
+            title={reorderMode ? 'Guardar nuevo orden' : 'Reordenar lista'}
+          >
+            <GripVertical size={16} />
+            {reorderMode ? (dirty ? 'Guardar orden' : 'Salir') : 'Reordenar'}
+          </button>
+
+          {/* Reset visual (desktop) */}
+          <button
+            type="button"
+            disabled={!dirty || savingOrder}
+            onClick={resetOrder}
+            className={`hidden sm:inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition ${
+              dirty ? 'bg-white text-gray-700 hover:bg-gray-50' : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+            }`}
+            title="Restaurar al último orden del backend"
+          >
+            <RotateCcw size={16} />
+            Deshacer
+          </button>
+        </div>
       </div>
 
       {/* Buscador */}
@@ -124,6 +309,11 @@ export default function Products() {
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
+        {reorderMode && debounced && (
+          <p className="hidden sm:block text-xs text-amber-700 mt-1">
+            Para guardar el nuevo orden, limpia el buscador (deja vacío el campo).
+          </p>
+        )}
       </div>
 
       {loading && <p className="text-gray-600">Cargando productos…</p>}
@@ -132,7 +322,7 @@ export default function Products() {
         <p className="text-gray-600">No hay productos que coincidan con la búsqueda.</p>
       )}
 
-      {/* MOBILE: Cards */}
+      {/* --- MOBILE: Cards SIN reordenar (como antes) --- */}
       {!loading && !loadError && filtered.length > 0 && (
         <div className="sm:hidden space-y-3">
           {filtered.map((p) => {
@@ -225,117 +415,101 @@ export default function Products() {
         </div>
       )}
 
-      {/* DESKTOP: Tabla */}
+      {/* --- DESKTOP: Tabla con drag handle --- */}
       {!loading && !loadError && filtered.length > 0 && (
         <div className="hidden sm:block">
           <div className="rounded-xl border border-gray-200 shadow-sm">
-            <table className="min-w-full">
-              <thead className="bg-gray-50 sticky top-0 z-20">
-                <tr className="text-left">
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
-                    Producto
-                  </th>
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
-                    Categoría
-                  </th>
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
-                    SKU
-                  </th>
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
-                    Costo
-                  </th>
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
-                    Peso
-                  </th>
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-center">
-                    Acciones
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-gray-200">
-                {filtered.map((p, idx) => {
-                  const img = getImg(p);
-                  return (
-                    <tr
-                      key={p.id}
-                      className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-colors`}
-                    >
-                      <td className="px-6 py-3">
-                        <div className="flex items-center gap-3">
-                          {img ? (
-                            <img
-                              src={img}
-                              alt={p.name || 'Producto'}
-                              className="h-10 w-10 rounded object-cover border border-gray-200"
-                            />
-                          ) : (
-                            <div className="h-10 w-10 rounded bg-gray-100 flex items-center justify-center border border-gray-200">
-                              <ImageIcon className="text-gray-400" size={16} />
-                            </div>
-                          )}
-                          <span className="text-sm text-coffee-900">{p.name || '—'}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-3 text-sm text-coffee-900">{p.category || '—'}</td>
-                      <td className="px-6 py-3 text-sm text-coffee-900">{p.sku || '—'}</td>
-                      <td className="px-6 py-3 text-sm text-coffee-900">{fmtCost(p.cost)}</td>
-                      <td className="px-6 py-3 text-sm text-coffee-900">{p.weight || '—'}</td>
-
-                      {/* Acciones (⋯ con Editar/Eliminar) */}
-                      <td className="px-6 py-3">
-                        <div className="relative flex items-center justify-center">
-                          <button
-                            type="button"
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 active:scale-95 transition text-gray-600"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setOpenMenuId((v) => (v === p.id ? null : p.id));
-                            }}
-                            aria-label="Más opciones"
-                            title="Más opciones"
-                          >
-                            <MoreVertical size={16} />
-                          </button>
-
-                          {openMenuId === p.id && (
-                            <div
-                              className="absolute right-0 top-9 w-36 rounded-lg border border-gray-200 bg-white shadow-lg z-50"
-                              onClick={stop}
-                            >
-                              <button
-                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                                onClick={() => {
-                                  setOpenMenuId(null);
-                                  handleEdit(p.id);
-                                }}
-                              >
-                                <div className="flex items-center gap-2">
-                                  <Pencil size={14} />
-                                  <span>Editar</span>
-                                </div>
-                              </button>
-                              <button
-                                className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
-                                onClick={() => {
-                                  setOpenMenuId(null);
-                                  handleDelete(p.id);
-                                }}
-                              >
-                                <div className="flex items-center gap-2">
-                                  <Trash2 size={14} />
-                                  <span>Eliminar</span>
-                                </div>
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </td>
+            <div className="overflow-x-auto">
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragStart={onDragStart}
+                onDragEnd={onDragEnd}
+              >
+                <table className="min-w-full">
+                  <thead className="bg-gray-50 sticky top-0 z-20">
+                    <tr className="text-left">
+                      <th className="px-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 w-[52px]">Orden</th>
+                      <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Imagen</th>
+                      <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Producto</th>
+                      <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Categoría</th>
+                      <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">SKU</th>
+                      <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Costo</th>
+                      <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Peso</th>
+                      <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-center">Acciones</th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  </thead>
+
+                  <SortableContext items={filtered.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+                    <tbody className="divide-y divide-gray-200">
+                      {filtered.map((p) => {
+                        const img = getImg(p);
+                        return (
+                          <SortableRow key={p.id} id={p.id}>
+                            <td className="px-6 py-3 text-sm">
+                              {img ? (
+                                <img
+                                  src={img}
+                                  alt={p.name || 'Producto'}
+                                  className="h-12 w-12 rounded object-cover border border-gray-200"
+                                />
+                              ) : (
+                                <div className="h-12 w-12 rounded bg-gray-100 flex items-center justify-center border border-gray-200">
+                                  <ImageIcon className="text-gray-400" size={18} />
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-6 py-3 text-sm text-coffee-900">{p.name || '—'}</td>
+                            <td className="px-6 py-3 text-sm text-coffee-900">{p.category || '—'}</td>
+                            <td className="px-6 py-3 text-sm text-gray-600">{p.sku || '—'}</td>
+                            <td className="px-6 py-3 text-sm text-gray-600">{fmtCost(p.cost)}</td>
+                            <td className="px-6 py-3 text-sm text-gray-600">{p.weight || '—'}</td>
+                            <td className="px-6 py-3 text-sm text-center">
+                              <div className="relative inline-flex">
+                                <button
+                                  type="button"
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 active:scale-95 transition text-gray-600"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOpenMenuId((v) => (v === p.id ? null : p.id));
+                                  }}
+                                  aria-label="Más opciones"
+                                  title="Más opciones"
+                                >
+                                  <MoreVertical size={16} />
+                                </button>
+
+                                {openMenuId === p.id && (
+                                  <div
+                                    className="absolute right-0 mt-2 w-36 rounded-lg border border-gray-200 bg-white shadow-lg z-50"
+                                    onClick={stop}
+                                  >
+                                    <button
+                                      className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                                      onClick={() => { setOpenMenuId(null); handleEdit(p.id); }}
+                                    >
+                                      Editar
+                                    </button>
+                                    <button
+                                      className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
+                                      onClick={() => { setOpenMenuId(null); handleDelete(p.id); }}
+                                    >
+                                      Eliminar
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </SortableRow>
+                        );
+                      })}
+                    </tbody>
+                  </SortableContext>
+                </table>
+
+                <DragOverlay>{/* overlay opcional */}</DragOverlay>
+              </DndContext>
+            </div>
           </div>
         </div>
       )}
