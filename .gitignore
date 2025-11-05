@@ -41,3 +41,4 @@ cookies.txt
 public/uploads/
 proyecto.zip
 .env.sanitized
+supabase/
