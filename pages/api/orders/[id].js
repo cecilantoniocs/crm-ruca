@@ -138,8 +138,7 @@ const patchSchema = z
     invoice_sent: z.boolean().optional(),
     paid: z.boolean().optional(),
 
-    // ⚠️ NUEVO: bandera para indicar que se deben borrar TODOS los abonos
-    // (sólo usar desde Ventas al poner "No pagado")
+    // bandera para que Sales pida limpiar abonos al poner "No pagado"
     wipePayments: z.boolean().optional(),
 
     items: z.array(itemSchema).optional(),
@@ -170,32 +169,42 @@ async function sumPaidForOrder(orderId) {
   return (data || []).reduce((acc, it) => acc + (Number(it.amount) || 0), 0);
 }
 
-// ---------- helper: borrar todos los abonos de una orden ----------
-async function wipePaymentsForOrder(orderId) {
-  // 1. obtener todos los payment_id que apuntan a esta orden
-  const { data: payItems, error: payItemsErr } = await supabaseServer
+// ---------- fallback seguro: limpiar abonos solo de ESTA orden y borrar pagos huérfanos ----------
+async function wipePaymentsForOrderSafe(orderId) {
+  // 1) obtener payment_ids involucrados en esta orden
+  const { data: pi, error: piErr } = await supabaseServer
     .from('payment_items')
     .select('payment_id')
     .eq('order_id', orderId);
 
-  if (payItemsErr) {
-    throw payItemsErr;
+  if (piErr) throw piErr;
+
+  const paymentIds = [...new Set((pi || []).map((r) => r.payment_id))];
+
+  // 2) borrar items de ESTA orden (deja intactos los items de otras órdenes)
+  if ((pi || []).length > 0) {
+    const { error: delItemsErr } = await supabaseServer
+      .from('payment_items')
+      .delete()
+      .eq('order_id', orderId);
+    if (delItemsErr) throw delItemsErr;
   }
 
-  const paymentIds = [...new Set((payItems || []).map((pi) => pi.payment_id))];
+  // 3) eliminar SOLO los payments que quedaron sin items
+  for (const pid of paymentIds) {
+    const { count, error: cntErr } = await supabaseServer
+      .from('payment_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('payment_id', pid);
+    if (cntErr) throw cntErr;
 
-  if (paymentIds.length === 0) {
-    return; // nada que borrar
-  }
-
-  // 2. borrar esos payments (ON DELETE CASCADE debe volar payment_items asociados)
-  const { error: delErr } = await supabaseServer
-    .from('payments')
-    .delete()
-    .in('id', paymentIds);
-
-  if (delErr) {
-    throw delErr;
+    if (!count || count === 0) {
+      const { error: delPayErr } = await supabaseServer
+        .from('payments')
+        .delete()
+        .eq('id', pid);
+      if (delPayErr) throw delPayErr;
+    }
   }
 }
 
@@ -307,36 +316,45 @@ export default async function handler(req, res) {
       }
 
       // ⚠️ CASO ESPECIAL: paid === false
-      // - Si viene wipePayments:true -> limpiar abonos y marcar no pagado (flujo Ventas).
-      // - Si NO viene wipePayments -> sólo marcar no pagado (flujo Account al borrar un abono).
+      // - Si viene wipePayments:true -> limpiar abonos y marcar no pagado (flujo Sales).
+      // - Si NO viene wipePayments -> sólo marcar no pagado (flujo Account u otros).
       if (body.paid === false) {
         const mustWipe = body.wipePayments === true;
         console.log('[orders PATCH] paid:false', { orderId: id, wipe: mustWipe });
 
         if (mustWipe) {
-          await wipePaymentsForOrder(id);
+          // 1) Intento atómico por RPC
+          const { error: rpcErr } = await supabaseServer.rpc(
+            'set_order_unpaid_and_clear_payments',
+            { p_order_id: id }
+          );
+
+          // 2) Fallback defensivo (solo si la RPC falla)
+          if (rpcErr) {
+            console.error('RPC set_order_unpaid_and_clear_payments error => fallback seguro', rpcErr);
+            await wipePaymentsForOrderSafe(id);
+            const { error: upErr } = await supabaseServer
+              .from('orders')
+              .update({ paid: false })
+              .eq('id', id);
+            if (upErr) throw upErr;
+          }
+        } else {
+          // sólo marcar no pagado
+          const { error: upErr } = await supabaseServer
+            .from('orders')
+            .update({ paid: false })
+            .eq('id', id);
+          if (upErr) throw upErr;
         }
 
-        // actualizar la orden a paid:false
-        const { data: updatedOrder, error: upErr } = await supabaseServer
-          .from('orders')
-          .update({ paid: false })
-          .eq('id', id)
-          .select(`
-            id, client_id, client_name, client_local, seller_id, delivered_by,
-            status, total, delivery_date, delivered_at, payment_method,
-            invoice, invoice_sent, paid, created_at, updated_at,
-            order_items ( id, product_id, name, sku, image_url, qty, price, subtotal )
-          `)
-          .maybeSingle();
-
-        if (upErr) throw upErr;
+        // devolver la orden recalculada
+        const { data: updatedOrder, error: selErr } = await fetchOrderWithItems(id);
+        if (selErr) throw selErr;
         if (!updatedOrder) return res.status(404).json({ error: 'Order not found' });
 
-        // recalcular dto
-        const dtoNoPays = toCamel(updatedOrder);
+        const dto = toCamel(updatedOrder);
 
-        // Traer pagos actuales (si hubo wipe, ya no habrá; si no hubo wipe, se conservan)
         const { data: pi3, error: piErr3 } = await supabaseServer
           .from('payment_items')
           .select(`
@@ -359,13 +377,12 @@ export default async function handler(req, res) {
         }));
 
         const amountPaid = payments3.reduce((a, b) => a + (Number(b.amount) || 0), 0);
-        const total = Number(dtoNoPays.total) || 0;
+        const total = Number(dto.total) || 0;
+        dto.payments = payments3;
+        dto.amountPaid = amountPaid;
+        dto.balance = Math.max(0, total - amountPaid);
 
-        dtoNoPays.payments = payments3;
-        dtoNoPays.amountPaid = amountPaid;
-        dtoNoPays.balance = Math.max(0, total - amountPaid);
-
-        return res.status(200).json(dtoNoPays);
+        return res.status(200).json(dto);
       }
 
       // --- flujo normal PATCH (incluye paid === true, invoice, etc.) ---

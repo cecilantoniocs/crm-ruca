@@ -3,6 +3,14 @@ import { supabaseServer } from '@/lib/supabaseServer';
 import { getReqUser, requirePerm } from '@/server/guard';
 import { z } from 'zod';
 
+// ---------- payment method: whitelist + normalización ----------
+const ALLOWED_PM = new Set(['efectivo', 'transferencia', 'cheque']);
+const normPM = (v) => {
+  if (v == null || v === '') return undefined;
+  const s = String(v).trim().toLowerCase();
+  return ALLOWED_PM.has(s) ? s : undefined;
+};
+
 // ---------- mappers ----------
 const mapPayment = (p) => ({
   id: p.id,
@@ -27,10 +35,19 @@ const mapItem = (it) => ({
 const idSchema = z.object({ id: z.string().min(1) });
 
 const patchSchema = z.object({
-  method: z.enum(['efectivo', 'transferencia', 'cheque']).optional(),
+  // aceptamos string libre y normalizamos a la whitelist
+  method: z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined ? undefined : normPM(v)))
+    .refine((v) => v === undefined || ALLOWED_PM.has(v), {
+      message: 'method inválido',
+    }),
   note: z.string().optional().nullable(),
-  paidAt: z.string().optional(), // YYYY-MM-DD o ISO
-  amountTotal: z.union([z.number(), z.string()])
+  // YYYY-MM-DD o ISO; si viene yyyy-mm-dd, lo dejamos tal cual (server lo acepta)
+  paidAt: z.string().optional(),
+  amountTotal: z
+    .union([z.number(), z.string()])
     .optional()
     .transform((v) => {
       if (v === undefined) return undefined;
@@ -116,7 +133,7 @@ export default async function handler(req, res) {
     if (req.method === 'DELETE') {
       requirePerm(user, 'client.account.charge');
 
-      // 1) Obtener pedidos afectados por ESTE pago
+      // 1) Pedidos impactados por ESTE pago
       const { data: items, error: itemsErr } = await supabaseServer
         .from('payment_items')
         .select('order_id')
@@ -131,7 +148,7 @@ export default async function handler(req, res) {
         new Set((items || []).map((it) => String(it.order_id)).filter(Boolean))
       );
 
-      // 2) Marcar esos pedidos como NO pagados (sin borrar otros pagos)
+      // 2) Marcar esos pedidos como NO pagados (regla de negocio)
       if (orderIds.length > 0) {
         const { error: upOrdersErr } = await supabaseServer
           .from('orders')

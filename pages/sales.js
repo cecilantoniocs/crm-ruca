@@ -45,6 +45,14 @@ const norm = (v) => (v ?? '').toString().trim().toLowerCase();
 const startOfDay = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x; };
 const endOfDay   = (d) => { const x = new Date(d); x.setHours(23,59,59,999); return x; };
 
+// YYYY-MM-DD en HORA LOCAL (no usar toISOString() para evitar desfase)
+const toYMDLocal = (d) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
 const fmtDateDMY = (isoOrYmd) => {
   if (!isoOrYmd) return '—';
   const s = String(isoOrYmd).slice(0, 10);
@@ -154,10 +162,12 @@ const SalesPage = () => {
   // usar SIEMPRE deliveryDate
   const oDate = (o) => o.deliveryDate || '';
 
-  // Dropdowns
+  // Dropdowns desktop
   const [openPaymentId, setOpenPaymentId] = useState(null);
   const [openInvoiceId, setOpenInvoiceId] = useState(null);
-  const [mobileMenu, setMobileMenu] = useState(null);
+
+  // Menú móvil contextual
+  const [mobileMenu, setMobileMenu] = useState(null); // { id, kind: 'payment'|'invoice', left, top }
 
   // --- fetch server-side desde /api/sales ---
   const refetch = useCallback(async () => {
@@ -219,7 +229,7 @@ const SalesPage = () => {
     [users]
   );
 
-  // Rango auto
+  // Rango auto (fijamos YYYY-MM-DD en local)
   useEffect(() => {
     if (quickRange === 'range') return;
     const now = new Date();
@@ -239,9 +249,8 @@ const SalesPage = () => {
       start = startOfDay(first);
     }
 
-    const toISODate = (d) => d.toISOString().slice(0, 10);
-    setFromDate(toISODate(start));
-    setToDate(toISODate(end));
+    setFromDate(toYMDLocal(start));
+    setToDate(toYMDLocal(end));
   }, [quickRange]);
 
   const CLP = useMemo(
@@ -338,11 +347,9 @@ const SalesPage = () => {
     }
 
     if (fromDate && toDate) {
-      const from = new Date(fromDate + 'T00:00:00');
-      const to = new Date(toDate + 'T23:59:59');
       rows = rows.filter((o) => {
-        const d = new Date(oDate(o) || '1970-01-01T00:00:00');
-        return d >= from && d <= to;
+        const dYMD = String(oDate(o) || '').slice(0, 10); // 'YYYY-MM-DD'
+        return dYMD >= fromDate && dYMD <= toDate;        // compare como texto
       });
     }
 
@@ -413,14 +420,42 @@ const SalesPage = () => {
     if (!prev) return;
 
     const newPaid = !prev.paid;
-    applyLocal(id, { paid: newPaid });
+
+    // Actualización optimista para que el KPI "Total por cobrar" no quede en 0 cuando pase a "No pagado"
+    if (!newPaid) {
+      applyLocal(id, {
+        paid: false,
+        paidSum: 0,
+        remaining: Number(prev.total) || 0,
+      });
+    } else {
+      applyLocal(id, {
+        paid: true,
+        remaining: 0,
+      });
+    }
 
     try {
-      await axiosClient.patch(`orders/${id}`, { paid: newPaid });
+      const payload = { paid: newPaid };
+
+      // Si viene desde Ventas a "No pagado", borramos TODOS los abonos
+      if (!newPaid) {
+        payload.wipePayments = true;
+      } else {
+        // Si marcamos "Pagado", pasamos el método actual para el abono automático
+        payload.paymentMethod = paymentToString(prev.paymentMethod);
+      }
+
+      await axiosClient.patch(`orders/${id}`, payload);
       await refreshOneFromView(id);
     } catch (e) {
       console.error(e);
-      applyLocal(id, { paid: prev.paid });
+      // Revertir al estado anterior si falla
+      applyLocal(id, {
+        paid: prev.paid,
+        paidSum: prev.paidSum,
+        remaining: prev.remaining,
+      });
       alert('No se pudo actualizar "Pago".');
     }
   };
@@ -432,6 +467,8 @@ const SalesPage = () => {
     applyLocal(id, { paymentMethod: method });
     try {
       await axiosClient.patch(`orders/${id}`, { paymentMethod: method });
+      // opcional: refrescar para mantener consistencia con vistas agregadas
+      await refreshOneFromView(id);
     } catch (e) {
       console.error(e);
       applyLocal(id, { paymentMethod: prev.paymentMethod });
@@ -454,6 +491,26 @@ const SalesPage = () => {
     applyLocal(id, patch);
     try {
       await axiosClient.patch(`orders/${id}`, patch);
+      await refreshOneFromView(id);
+    } catch (e) {
+      console.error(e);
+      applyLocal(id, { invoice: prev.invoice, invoiceSent: prev.invoiceSent });
+    }
+  };
+
+  // Toggle rápido SOLO móvil: Facturada <-> No facturada (bloqueado si Sin factura)
+  const toggleInvoiceMobile = async (id) => {
+    const prev = orders.find((o) => o.id === id);
+    if (!prev) return;
+    if (!prev.invoice) return; // Sin factura => bloqueado
+
+    const next = { invoice: true, invoiceSent: !prev.invoiceSent };
+
+    // Optimista
+    applyLocal(id, next);
+    try {
+      await axiosClient.patch(`orders/${id}`, next);
+      await refreshOneFromView(id);
     } catch (e) {
       console.error(e);
       applyLocal(id, { invoice: prev.invoice, invoiceSent: prev.invoiceSent });
@@ -786,16 +843,22 @@ const SalesPage = () => {
                         <PaymentPill value={o.paymentMethod} size="sm" />
                       </button>
 
-                      {/* Factura (abre menú móvil con kind='invoice') */}
-                      <button
-                        type="button"
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={(e) => openMobileMenu(e, o, 'invoice')}
-                        className="inline-flex items-center gap-2"
-                        title="Cambiar estado de factura"
-                      >
-                        <span className={invCls}>{invLabel}</span>
-                      </button>
+                      {/* Factura: en móvil alterna entre facturada / no facturada; bloqueado si 'Sin factura' */}
+                      {(() => {
+                        const disabled = !o.invoice; // "Sin factura" => bloquear
+                        return (
+                          <button
+                            type="button"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={() => !disabled && toggleInvoiceMobile(o.id)}
+                            className={`inline-flex items-center gap-2 ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+                            title={disabled ? 'Sin factura (cámbialo solo desde Orders)' : 'Alternar Facturada / No facturada'}
+                            disabled={disabled}
+                          >
+                            <span className={invCls}>{invLabel}</span>
+                          </button>
+                        );
+                      })()}
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -988,18 +1051,20 @@ const SalesPage = () => {
                               </div>
                             </td>
 
-                            {/* Factura (sin los tres puntitos) */}
+                            {/* Factura (menu desktop; bloqueado si 'Sin factura') */}
                             <td className="px-6 py-3 text-sm whitespace-nowrap">
                               <div className="relative inline-block">
                                 <button
                                   type="button"
                                   onPointerDown={stopPD}
                                   onClick={() => {
+                                    if (!o.invoice) return; // "Sin factura": no abrir menú
                                     setOpenInvoiceId((v) => (v === o.id ? null : o.id));
                                     setOpenPaymentId(null);
                                   }}
-                                  className="inline-flex items-center gap-2"
-                                  title="Cambiar estado de factura"
+                                  className={`inline-flex items-center gap-2 ${!o.invoice ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                  title={o.invoice ? 'Cambiar estado de factura' : 'Sin factura (cámbialo solo desde Orders)'}
+                                  disabled={!o.invoice}
                                 >
                                   <span className={invCls}>{invLabel}</span>
                                 </button>
@@ -1009,12 +1074,11 @@ const SalesPage = () => {
                                     className="absolute top-full left-0 mt-1 w-44 rounded-lg border border-gray-200 bg-white shadow-lg z-50 flex flex-col"
                                     onPointerDown={stopPD}
                                   >
+                                    {/* Mostrar "Sin factura" deshabilitado para dejar clara la regla */}
                                     <button
-                                      className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                                      onClick={() => {
-                                        setOpenInvoiceId(null);
-                                        updateInvoiceStatus(o.id, 'sin_factura');
-                                      }}
+                                      className="w-full text-left px-3 py-2 text-sm opacity-50 cursor-not-allowed"
+                                      title="Sin factura se gestiona desde Orders"
+                                      disabled
                                     >
                                       Sin factura
                                     </button>
@@ -1138,6 +1202,59 @@ const SalesPage = () => {
               </div>
             </div>
           </div>
+
+          {/* Menú contextual móvil */}
+          {mobileMenu && (
+            <>
+              <div
+                className="fixed inset-0 z-[998]"
+                onPointerDown={() => setMobileMenu(null)}
+              />
+              <div
+                className="absolute z-[999] w-44 rounded-lg border border-gray-200 bg-white shadow-lg"
+                style={{ left: mobileMenu.left, top: mobileMenu.top }}
+                onPointerDown={stopPD}
+              >
+                {(() => {
+                  const o = orders.find((x) => x.id === mobileMenu.id);
+                  if (!o) return null;
+                  // Solo menú de método de pago en móvil
+                  if (mobileMenu.kind !== 'payment') return null;
+                  return (
+                    <div className="flex flex-col">
+                      <button
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                        onClick={() => {
+                          setMobileMenu(null);
+                          updatePaymentMethod(o.id, 'efectivo');
+                        }}
+                      >
+                        Efectivo
+                      </button>
+                      <button
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                        onClick={() => {
+                          setMobileMenu(null);
+                          updatePaymentMethod(o.id, 'transferencia');
+                        }}
+                      >
+                        Transferencia
+                      </button>
+                      <button
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                        onClick={() => {
+                          setMobileMenu(null);
+                          updatePaymentMethod(o.id, 'cheque');
+                        }}
+                      >
+                        Cheque
+                      </button>
+                    </div>
+                  );
+                })()}
+              </div>
+            </>
+          )}
         </>
       )}
     </Layout>

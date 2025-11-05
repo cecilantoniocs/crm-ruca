@@ -2,18 +2,6 @@
 import { supabaseServer } from '@/lib/supabaseServer';
 import { getReqUser, requirePerm } from '@/server/guard';
 
-function startOfDayISO(d) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x.toISOString();
-}
-function nextDayISO(d) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  x.setDate(x.getDate() + 1);
-  return x.toISOString();
-}
-
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).end();
   const user = getReqUser(req);
@@ -21,7 +9,7 @@ export default async function handler(req, res) {
   try {
     requirePerm(user, 'sales.read');
 
-    // Parámetros (front actual usa fromDate / toDate)
+    // Parámetros (front usa fromDate / toDate en formato YYYY-MM-DD)
     const {
       q,                       // búsqueda por cliente/local (opcional)
       fromDate, toDate,        // rango de fechas (YYYY-MM-DD)
@@ -56,14 +44,13 @@ export default async function handler(req, res) {
       .order('id', { ascending: false })
       .limit(2000);
 
-    // Filtros de fecha (sobre delivery_date)
+    // Filtro de fecha sobre delivery_date (la fecha que eliges en Orders)
+    // Usamos comparación directa de 'YYYY-MM-DD' para evitar desfaces por UTC.
     if (fromDate) {
-      const f = startOfDayISO(fromDate);
-      query = query.gte('delivery_date', f);
+      query = query.gte('delivery_date', fromDate);
     }
     if (toDate) {
-      const tNext = nextDayISO(toDate); // exclusivo del día siguiente
-      query = query.lt('delivery_date', tNext);
+      query = query.lte('delivery_date', toDate);
     }
 
     // Búsqueda por texto (cliente/local)
