@@ -12,10 +12,9 @@ import {
   Trash2,
   Pencil,
   User,
+  ExternalLink,
 } from 'lucide-react';
 import { getCurrentSeller, getClients } from '../helpers';
-
-// ⬇️ Pull-to-refresh (window)
 import PullToRefreshHeader from '../components/PullToRefreshHeader';
 import usePullToRefreshWindow from '../hooks/usePullToRefreshWindow';
 
@@ -50,15 +49,26 @@ const StatusBadge = ({ value }) => {
 const paymentToString = (val) => {
   if (!val) return 'efectivo';
   const v = String(val).trim().toLowerCase();
-  return v === 'transferencia' ? 'transferencia' : 'efectivo';
+  if (v === 'transferencia') return 'transferencia';
+  if (v === 'cheque') return 'cheque';
+  return 'efectivo';
+};
+
+const nextPayment = (val) => {
+  const order = ['efectivo', 'transferencia', 'cheque'];
+  const cur = paymentToString(val);
+  const idx = order.indexOf(cur);
+  return order[(idx + 1) % order.length];
 };
 
 const PaymentBadge = ({ value }) => {
   const v = paymentToString(value);
-  const label = v === 'transferencia' ? 'Transferencia' : 'Efectivo';
+  const label = v === 'transferencia' ? 'Transferencia' : v === 'cheque' ? 'Cheque' : 'Efectivo';
   const cls =
     v === 'transferencia'
       ? 'bg-brand-50 text-brand-700 ring-brand-200'
+      : v === 'cheque'
+      ? 'bg-gray-50 text-gray-700 ring-gray-200'
       : 'bg-sky-50 text-sky-700 ring-sky-200';
   return (
     <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${cls}`}>
@@ -76,6 +86,16 @@ const fmtDateYMD = (iso) => {
   const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
   return `${dd} ${meses[mm - 1]} ${yyyy}`;
 };
+
+// Mostrar número de pedido (#0001)
+const formatOrderNo = (n) => {
+  const num = Number(n);
+  if (Number.isFinite(num) && num >= 0) return `#${String(num).padStart(4, '0')}`;
+  return null;
+};
+const shortFromUUID = (id) => (id ? `#${String(id).replace(/-/g, '').slice(0, 4).toUpperCase()}` : '#—');
+const getOrderCode = (o) =>
+  formatOrderNo(o?.order_no ?? o?.orderNumber ?? o?.number ?? o?.seq) || shortFromUUID(o?.id);
 
 export default function Orders() {
   const router = useRouter();
@@ -118,17 +138,36 @@ export default function Orders() {
     return () => window.removeEventListener('click', close);
   }, []);
 
-  // ✅ Refetch unificado (misma lógica que tu carga inicial)
+  // ✅ Refetch resiliente (secuencial, con try/catch por recurso)
   const refetch = useCallback(async () => {
-    try {
-      setLoading(true);
-      setLoadError('');
+    setLoading(true);
+    setLoadError('');
 
+    // 1) Pedidos
+    try {
       const resO = await axiosClient.get('orders');
       const list = resO?.data ?? [];
       list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
       setOrders(list);
+    } catch (e) {
+      console.error('Error cargando pedidos:', e);
+      setOrders([]);
+      setLoadError('Error al cargar pedidos.');
+      setLoading(false);
+      return;
+    }
 
+    // 2) Repartidores (si falla, seguimos)
+    try {
+      const resCour = await axiosClient.get('couriers');
+      setCouriers(resCour?.data ?? []);
+    } catch (e) {
+      console.warn('No se pudieron cargar repartidores. Continuando sin ellos:', e);
+      setCouriers([]);
+    }
+
+    // 3) Clientes (si falla, seguimos)
+    try {
       const seller = getCurrentSeller?.();
       if (seller?.id) {
         const resC = await getClients(seller.id);
@@ -136,19 +175,14 @@ export default function Orders() {
       } else {
         setClients([]);
       }
-
-      // ⚠️ obtenemos repartidores desde /api/couriers
-      const resCour = await axiosClient.get('couriers');
-      setCouriers(resCour?.data ?? []);
     } catch (e) {
-      console.error(e);
-      setLoadError('Error al cargar pedidos o clientes.');
-    } finally {
-      setLoading(false);
+      console.warn('Error cargando clientes. Continuando sin ellos:', e);
+      setClients([]);
     }
+
+    setLoading(false);
   }, []);
 
-  // Carga inicial
   useEffect(() => {
     refetch();
   }, [refetch]);
@@ -172,6 +206,9 @@ export default function Orders() {
   const mapsUrl = (addr) =>
     `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr || '')}`;
 
+  // helper: ¿cadena "larga"? (reutilizamos para local y dirección)
+  const isLongAddress = (s) => (s || '').trim().length > 20;
+
   const filtered = useMemo(() => {
     const bySearch = (o) => {
       if (!debounced) return true;
@@ -181,13 +218,15 @@ export default function Orders() {
       const address = (clientMap.get(o.clientId)?.dir1 || '').toLowerCase();
       const pay = paymentToString(o.paymentMethod);
       const courier = courierName(o.deliveredBy).toLowerCase();
+      const code = getOrderCode(o).toLowerCase(); // permite buscar por #0001
       return (
         client.includes(debounced) ||
         local.includes(debounced) ||
         status.includes(debounced) ||
         address.includes(debounced) ||
         pay.includes(debounced) ||
-        courier.includes(debounced)
+        courier.includes(debounced) ||
+        code.includes(debounced)
       );
     };
 
@@ -298,15 +337,18 @@ export default function Orders() {
         : 'text-gray-600 hover:text-coffee'
     }`;
 
-  // helper: ¿dirección "larga"?
-  const isLongAddress = (s) => (s || '').trim().length > 20;
-
-  // ⬇️ Hook pull-to-refresh acoplado a window
+  // ⬇️ Hook para Pull-to-Refresh en ventana
   const { headerProps } = usePullToRefreshWindow({ onRefresh: refetch, threshold: 60 });
+
+  // Ir a cuenta del cliente
+  const goClientAccount = (clientId) => {
+    if (!clientId) return;
+    router.push(`/client/${clientId}/account`);
+  };
 
   return (
     <Layout>
-      {/* Header de Pull-To-Refresh pegado arriba */}
+      {/* Header PTR pegado arriba del contenido. */}
       <PullToRefreshHeader {...headerProps} />
 
       {/* Header */}
@@ -330,7 +372,7 @@ export default function Orders() {
           <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
           <input
             type="text"
-            placeholder="Buscar por cliente, local, dirección, estado, pago o repartidor…"
+            placeholder="Buscar por #, cliente, local, dirección, estado, pago o repartidor…"
             className="pl-10 pr-4 py-2 w-full rounded-lg border border-gray-300 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -361,6 +403,7 @@ export default function Orders() {
             const items = o.items ?? [];
             const delivered = statusToString(o.status) === 'entregado';
             const dx = swipeX[o.id] || 0;
+            const orderCode = getOrderCode(o);
 
             const bgSwipe =
               dx < -30 ? 'bg-emerald-50 border-emerald-200' : delivered ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-100';
@@ -375,6 +418,14 @@ export default function Orders() {
                 onTouchCancel={() => setSwipeX((s) => ({ ...s, [o.id]: 0 }))}
                 style={{ transform: `translate3d(${dx}px, 0, 0)`, transition: 'transform 180ms ease' }}
               >
+                {/* Número de pedido (a la izquierda del lápiz) */}
+                <div
+                  className="absolute right-12 top-2 inline-flex items-center justify-center h-8 px-2 rounded-md bg-gray-900 text-white text-xs font-mono tracking-wider shadow ring-1 ring-black/10 select-none"
+                  title="Número de pedido"
+                >
+                  {orderCode}
+                </div>
+
                 {/* lápiz editar */}
                 <button
                   type="button"
@@ -386,10 +437,23 @@ export default function Orders() {
                   <Pencil size={16} />
                 </button>
 
-                {/* Cliente / Local */}
-                <div className="pr-10">
+                {/* Local (primero) + acceso cuenta, luego Cliente */}
+                <div className="pr-20">
+                  <div className="flex items-center gap-2 text-sm text-gray-700">
+                    <span>{o.clientLocal || '—'}</span>
+                    {o.clientId && (
+                      <button
+                        type="button"
+                        className="inline-flex items-center justify-center rounded hover:bg-gray-100 text-gray-600 shrink-0 h-6 w-6"
+                        title="Ver cuenta del cliente"
+                        aria-label="Ver cuenta del cliente"
+                        onClick={() => goClientAccount(o.clientId)}
+                      >
+                        <ExternalLink size={16} />
+                      </button>
+                    )}
+                  </div>
                   <h3 className="text-base font-semibold text-coffee">{o.clientName || '—'}</h3>
-                  <p className="text-sm text-gray-600">{o.clientLocal || '—'}</p>
                 </div>
 
                 {/* Dirección + GPS (móvil) */}
@@ -404,7 +468,7 @@ export default function Orders() {
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={stop}
-                      className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-full bg-brand-50 text-brand-600 hover:bg-brand-100 border border-brand-200"
+                      className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-full bg-brand-50 text-brand-600 hover:bg-brand-100 border border-brand-200 shrink-0"
                       title="Abrir en Google Maps"
                       aria-label="Abrir en Google Maps"
                     >
@@ -461,9 +525,7 @@ export default function Orders() {
                   <button
                     type="button"
                     className="active:scale-95 transition"
-                    onClick={() =>
-                      updatePayment(o.id, paymentToString(o.paymentMethod) === 'efectivo' ? 'transferencia' : 'efectivo')
-                    }
+                    onClick={() => updatePayment(o.id, nextPayment(o.paymentMethod))}
                     title="Cambiar método de pago"
                   >
                     <PaymentBadge value={o.paymentMethod} />
@@ -484,11 +546,14 @@ export default function Orders() {
         <div className="hidden sm:block">
           <div className="rounded-xl border border-gray-200 shadow-sm">
             <div className="overflow-x-auto">
-              <table className="min-w-[1200px] w-full">
+              <table className="min-w-[1240px] w-full">
                 <thead className="bg-gray-50">
                   <tr className="text-left">
-                    <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Cliente</th>
+                    {/* NUEVA primera columna: N° */}
+                    <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">N°</th>
+                    {/* Local primero, Cliente segundo */}
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Local</th>
+                    <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Cliente</th>
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Dirección</th>
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Entrega</th>
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Estado</th>
@@ -505,14 +570,56 @@ export default function Orders() {
                     const c = clientMap.get(o.clientId);
                     const addr = c?.dir1 || '';
                     const items = o.items ?? [];
-
-                    const long = (addr || '').trim().length > 20;
+                    const long = isLongAddress(addr);
+                    const localLong = isLongAddress(o.clientLocal);
+                    const orderCode = getOrderCode(o);
 
                     return (
                       <React.Fragment key={o.id}>
                         <tr className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-colors`}>
+                          {/* N° */}
+                          <td className="px-6 py-3 text-sm whitespace-nowrap">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-gray-900 text-white font-mono text-xs tracking-wider ring-1 ring-black/10">
+                              {orderCode}
+                            </span>
+                          </td>
+
+                          {/* Local + acceso a cuenta (con clamp como Dirección) */}
+                          <td className="px-6 py-3 text-sm text-coffee">
+                            <div className={`inline-flex ${localLong ? 'items-start' : 'items-center'} gap-2`}>
+                              <span
+                                className="block whitespace-normal break-words leading-tight"
+                                style={
+                                  localLong
+                                    ? {
+                                        width: '20ch',
+                                        display: '-webkit-box',
+                                        WebkitLineClamp: 2,
+                                        WebkitBoxOrient: 'vertical',
+                                        overflow: 'hidden',
+                                      }
+                                    : {}
+                                }
+                                title={o.clientLocal || '—'}
+                              >
+                                {o.clientLocal || '—'}
+                              </span>
+                              {o.clientId && (
+                                <button
+                                  type="button"
+                                  onClick={() => goClientAccount(o.clientId)}
+                                  className={`inline-flex ${localLong ? 'mt-0.5' : ''} h-7 w-7 items-center justify-center rounded-md hover:bg-gray-100 text-gray-600 shrink-0`}
+                                  title="Ver cuenta del cliente"
+                                  aria-label="Ver cuenta del cliente"
+                                >
+                                  <ExternalLink size={16} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Cliente */}
                           <td className="px-6 py-3 text-sm text-coffee">{o.clientName || '—'}</td>
-                          <td className="px-6 py-3 text-sm text-coffee">{o.clientLocal || '—'}</td>
 
                           {/* Dirección + GPS */}
                           <td className="px-6 py-3 text-sm text-coffee">
@@ -540,7 +647,7 @@ export default function Orders() {
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   onClick={stop}
-                                  className={`inline-flex ${long ? 'mt-0.5' : ''} h-7 w-7 items-center justify-center rounded-full bg-brand-50 text-brand-600 hover:bg-brand-100 border border-brand-200`}
+                                  className={`inline-flex ${long ? 'mt-0.5' : ''} h-7 w-7 items-center justify-center rounded-full bg-brand-50 text-brand-600 hover:bg-brand-100 border border-brand-200 shrink-0`}
                                   title="Abrir en Google Maps"
                                   aria-label="Abrir en Google Maps"
                                 >
@@ -598,6 +705,7 @@ export default function Orders() {
                               <div className="absolute left-0 mt-2 w-44 rounded-lg border border-gray-200 bg-white shadow-lg z-50">
                                 <button className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50" onClick={() => { setOpenPaymentId(null); updatePayment(o.id, 'efectivo'); }}>Efectivo</button>
                                 <button className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50" onClick={() => { setOpenPaymentId(null); updatePayment(o.id, 'transferencia'); }}>Transferencia</button>
+                                <button className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50" onClick={() => { setOpenPaymentId(null); updatePayment(o.id, 'cheque'); }}>Cheque</button>
                               </div>
                             )}
                           </td>
@@ -687,18 +795,25 @@ export default function Orders() {
                           </td>
                         </tr>
 
-                        {/* Detalle (SOLO ESCRITORIO) */}
+                        {/* Detalle (SOLO ESCRITORIO) → menos espacio entre columnas */}
                         <tr className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
-                          <td colSpan={10} className="px-6 pb-4">
+                          {/* +1 col por la nueva columna N° → colSpan 11 */}
+                          <td colSpan={11} className="px-6 pb-4">
                             <div className="mt-1 rounded-lg border border-indigo-200 bg-indigo-50 p-4">
                               <h4 className="text-sm font-semibold text-coffee mb-2">Detalle de productos</h4>
                               <div className="overflow-x-auto">
-                                <table className="min-w-full">
+                                <table className="min-w-full table-fixed">
+                                  <colgroup>
+                                    <col style={{ width: '55%' }} />
+                                    <col style={{ width: '15%' }} />
+                                    <col style={{ width: '15%' }} />
+                                    <col style={{ width: '15%' }} />
+                                  </colgroup>
                                   <thead>
                                     <tr className="text-left text-xs uppercase tracking-wide text-gray-600 border-b border-indigo-100">
-                                      <th className="py-1 pr-4">Producto</th>
-                                      <th className="py-1 pr-4">Cantidad</th>
-                                      <th className="py-1 pr-4 text-right">Precio</th>
+                                      <th className="py-1 pr-2">Producto</th>
+                                      <th className="py-1 pr-2">Cantidad</th>
+                                      <th className="py-1 pr-2 text-right">Precio</th>
                                       <th className="py-1 pr-0 text-right">Subtotal</th>
                                     </tr>
                                   </thead>
@@ -710,9 +825,9 @@ export default function Orders() {
                                     )}
                                     {(items ?? []).map((it, i) => (
                                       <tr key={i} className="border-t border-indigo-100">
-                                        <td className="py-1 pr-4">{it.name || 'Producto'}</td>
-                                        <td className="py-1 pr-4">{it.qty}</td>
-                                        <td className="py-1 pr-4 text-right">{CLP.format(Number(it.price) || 0)}</td>
+                                        <td className="py-1 pr-2">{it.name || 'Producto'}</td>
+                                        <td className="py-1 pr-2">{it.qty}</td>
+                                        <td className="py-1 pr-2 text-right">{CLP.format(Number(it.price) || 0)}</td>
                                         <td className="py-1 pr-0 text-right">
                                           {CLP.format(Number(it.subtotal) || (Number(it.qty) * Number(it.price) || 0))}
                                         </td>

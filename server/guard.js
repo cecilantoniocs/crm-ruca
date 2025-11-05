@@ -1,12 +1,25 @@
 // /server/guard.js
 import jwt from 'jsonwebtoken';
 
-// Permisos base para no-admin si BD/JWT vienen vacíos
+// Permisos base que se le dan a un usuario NO admin cuando el JWT
+// viene sin "permissions" o viene vacío.
+// OJO: acá solo van permisos de lectura / uso normal.
+// NO agregamos cosas peligrosas como marcar pagado, cobrar, etc.
 const DEFAULT_NONADMIN_PERMS = [
+  // productos / clientes / órdenes básicas
   'products.read',
-  'clients.read', 'clients.create', 'clients.update',
-  'orders.read', 'orders.create', 'orders.update',
+  'clients.read',
+  'clients.create',
+  'clients.update',
+  'orders.read',
+  'orders.create',
+  'orders.update',
+
+  // ventas: solo lectura
   'sales.read',
+
+  // cuenta de cliente: ver estado de cuenta/saldo
+  'client.account.read',
 ];
 
 // ---- helpers ----
@@ -36,9 +49,11 @@ function normalizePerms(val) {
   if (val == null || val === '') return [];
   if (typeof val === 'string') {
     try {
+      // a veces llega como string tipo '["a","b"]' pero con comillas dobladas
       const parsed = JSON.parse(val.replace(/""/g, '"'));
       return Array.isArray(parsed) ? parsed : [];
     } catch {
+      // fallback: string con comas -> array
       const parts = val.split(',').map((s) => s.trim()).filter(Boolean);
       return parts;
     }
@@ -46,7 +61,8 @@ function normalizePerms(val) {
   return [];
 }
 
-// 👇 clave: normaliza la clave a minúsculas y reemplaza ":" por "."
+// normaliza la clave de permiso: lowercase y reemplaza ":" por "."
+// Ej: "sales:update_payment" -> "sales.update_payment"
 function normalizePermKey(s) {
   return String(s || '').trim().toLowerCase().replace(/:/g, '.');
 }
@@ -67,7 +83,7 @@ export function getReqUser(req) {
     // normaliza array y también cada clave (":" -> ".")
     let perms = normalizePerms(payload.permissions).map(normalizePermKey);
 
-    // fallback si no-admin y quedó vacío
+    // fallback si es NO admin y viene sin permisos -> le damos baseline segura
     if (!isAdmin && perms.length === 0) {
       perms = DEFAULT_NONADMIN_PERMS;
     }
@@ -94,6 +110,7 @@ export function getReqUser(req) {
   }
 }
 
+// Exigir login
 export function requireAuth(user) {
   if (!user) {
     const err = new Error('UNAUTHENTICATED');
@@ -102,6 +119,8 @@ export function requireAuth(user) {
   }
 }
 
+// Exigir un permiso específico
+// Uso: requirePerm(user, 'sales.read')
 export function requirePerm(user, perm) {
   requireAuth(user);
   if (user.is_admin || user.isAdmin) return;
@@ -116,7 +135,8 @@ export function requirePerm(user, perm) {
   throw err;
 }
 
-// ✅ Nuevo helper: permite si el usuario tiene AL MENOS UNO de la lista
+// Exigir AL MENOS UNO de una lista de permisos
+// Uso: requireAnyPerm(user, ['sales.mark_paid','sales.update_invoice'])
 export function requireAnyPerm(user, perms = []) {
   requireAuth(user);
   if (user.is_admin || user.isAdmin) return;

@@ -21,63 +21,108 @@ export default async function handler(req, res) {
   try {
     requirePerm(user, 'sales.read');
 
-    const { q, from, to, partnerId, courierId } = req.query;
+    // Parámetros (front actual usa fromDate / toDate)
+    const {
+      q,                       // búsqueda por cliente/local (opcional)
+      fromDate, toDate,        // rango de fechas (YYYY-MM-DD)
+      owner,                   // 'cecil' | 'rucapellan' (opcional)
+      courierId,               // repartidor (opcional)
+      invoice,                 // 'facturado' | 'no_facturado' | 'sin_factura' (opcional)
+      paid,                    // 'pagado' | 'no_pagado' (opcional)
+      paymentMethod            // 'efectivo' | 'transferencia' | 'cheque' (opcional)
+    } = req.query;
 
+    // Base: vista acelerada con ítems y saldo
     let query = supabaseServer
-      .from('orders')
+      .from('sales_with_payments_items')
       .select(`
-        id, client_id, client_name, client_local, seller_id, delivered_by,
-        status, total, delivery_date, delivered_at, payment_method,
-        invoice, invoice_sent, paid, created_at,
-        order_items:order_items (
-          id, product_id, name, sku, image_url, qty, price, subtotal
-        )
+        id,
+        total,
+        paid,
+        delivery_date,
+        client_id,
+        client_name,
+        client_local,
+        delivered_by,
+        payment_method,
+        invoice,
+        invoice_sent,
+        client_owner,
+        paid_sum,
+        remaining,
+        items
       `)
-      // En tu DB el estado entregado es 'entregado'
-      .eq('status', 'entregado')
-      .order('delivered_at', { ascending: false })
-      .order('delivery_date', { ascending: false });
+      .order('delivery_date', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(2000);
 
-    // Búsqueda por cliente/local
+    // Filtros de fecha (sobre delivery_date)
+    if (fromDate) {
+      const f = startOfDayISO(fromDate);
+      query = query.gte('delivery_date', f);
+    }
+    if (toDate) {
+      const tNext = nextDayISO(toDate); // exclusivo del día siguiente
+      query = query.lt('delivery_date', tNext);
+    }
+
+    // Búsqueda por texto (cliente/local)
     if (q && String(q).trim()) {
       const s = `%${String(q).trim()}%`;
       query = query.or(`client_name.ilike.${s},client_local.ilike.${s}`);
     }
 
-    // Rango de fechas (preferimos delivered_at; también limitamos delivery_date para respaldo)
-    if (from) {
-      const f = startOfDayISO(from);
-      query = query.gte('delivered_at', f).gte('delivery_date', f);
-    }
-    if (to) {
-      // inclusivo del día 'to' usando < a medianoche del día siguiente
-      const tNext = nextDayISO(to);
-      query = query.lt('delivered_at', tNext).lt('delivery_date', tNext);
+    // Cartera (owner)
+    if (owner && owner !== 'all') {
+      query = query.eq('client_owner', owner);
     }
 
-    if (partnerId) query = query.eq('seller_id', partnerId);
-    if (courierId) query = query.eq('delivered_by', courierId);
+    // Repartidor
+    if (courierId && courierId !== 'all') {
+      query = query.eq('delivered_by', courierId);
+    }
+
+    // Estado de factura
+    if (invoice && invoice !== 'all') {
+      if (invoice === 'facturado') {
+        query = query.eq('invoice', true).eq('invoice_sent', true);
+      } else if (invoice === 'no_facturado') {
+        query = query.eq('invoice', true).eq('invoice_sent', false);
+      } else if (invoice === 'sin_factura') {
+        query = query.eq('invoice', false);
+      }
+    }
+
+    // Estado de pago
+    if (paid && paid !== 'all') {
+      query = query.eq('paid', paid === 'pagado');
+    }
+
+    // Método de pago
+    if (paymentMethod && paymentMethod !== 'all') {
+      query = query.eq('payment_method', paymentMethod);
+    }
 
     const { data, error } = await query;
     if (error) throw error;
 
+    // Mapear a camelCase para el front
     const rows = (data || []).map((o) => ({
       id: o.id,
+      total: o.total,
+      paid: o.paid,
+      deliveryDate: o.delivery_date,
       clientId: o.client_id,
       clientName: o.client_name,
       clientLocal: o.client_local,
-      sellerId: o.seller_id,
       deliveredBy: o.delivered_by,
-      status: o.status,
-      total: o.total,
-      deliveryDate: o.delivery_date,
-      deliveredAt: o.delivered_at,
       paymentMethod: o.payment_method,
       invoice: o.invoice,
       invoiceSent: o.invoice_sent,
-      paid: o.paid,
-      createdAt: o.created_at,
-      items: o.order_items || [],
+      clientOwner: o.client_owner,
+      paidSum: o.paid_sum,
+      remaining: o.remaining,
+      items: Array.isArray(o.items) ? o.items : [], // [{name, qty, price, subtotal}]
     }));
 
     res.json(rows);

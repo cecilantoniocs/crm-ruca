@@ -47,7 +47,7 @@ const postBodySchema = z.object({
   client_id: z.union([z.string(), z.number()]),
   client_name: z.string().min(2),
   client_local: z.string().optional().nullable(),
-  seller_id: z.union([z.string(), z.number()]).optional(), // 👈 opcional; default = user.id
+  seller_id: z.union([z.string(), z.number()]).optional(), // opcional; default = user.id
   delivered_by: z.union([z.string(), z.number()]).optional().nullable(),
   status: z.enum(STATUSES).default('pendiente'),
   delivery_date: z.string().optional().nullable().transform(v => {
@@ -146,7 +146,34 @@ export default async function handler(req, res) {
       const { data, error } = await query;
       if (error) throw error;
 
-      return res.json((data || []).map(toCamel));
+      const rows = (data || []).map(toCamel);
+
+      // ---- SUMAS DE PAGOS (amountPaid) Y BALANCE ----
+      if (rows.length > 0) {
+        const ids = rows.map(r => r.id);
+        const { data: payItems, error: piErr } = await supabaseServer
+          .from('payment_items')
+          .select('order_id, amount')
+          .in('order_id', ids);
+
+        if (piErr) throw piErr;
+
+        const sumByOrder = new Map();
+        for (const pi of (payItems || [])) {
+          const k = pi.order_id;
+          const prev = sumByOrder.get(k) || 0;
+          sumByOrder.set(k, prev + (Number(pi.amount) || 0));
+        }
+
+        for (const r of rows) {
+          const paid = sumByOrder.get(r.id) || 0;
+          const total = Number(r.total) || 0;
+          r.amountPaid = paid;
+          r.balance = Math.max(0, total - paid);
+        }
+      }
+
+      return res.json(rows);
     }
 
     // --------- CREAR (POST) ---------
@@ -165,7 +192,7 @@ export default async function handler(req, res) {
         status: body.status,
         delivery_date: body.delivery_date, // YYYY-MM-DD o null
         delivered_at: body.status === 'entregado' ? new Date().toISOString() : null,
-        payment_method: body.payment_method, // 👈 ya viene normalizado por zod->normPM
+        payment_method: body.payment_method, // normalizado
         invoice: body.invoice ?? false,
         invoice_sent: body.invoice_sent ?? false,
         paid: body.paid ?? false,
@@ -202,7 +229,7 @@ export default async function handler(req, res) {
         throw errItems;
       }
 
-      // 3) devolver orden completa
+      // 3) devolver orden completa + totales de pago
       const { data: full, error: errSelect } = await supabaseServer
         .from('orders')
         .select(`
@@ -215,7 +242,21 @@ export default async function handler(req, res) {
         .maybeSingle();
       if (errSelect) throw errSelect;
 
-      return res.status(201).json(toCamel(full));
+      const dto = toCamel(full);
+
+      // suma pagos (recién creada normalmente 0, pero lo dejamos consistente)
+      const { data: payItems, error: piErr } = await supabaseServer
+        .from('payment_items')
+        .select('order_id, amount')
+        .eq('order_id', orderId);
+
+      if (piErr) throw piErr;
+
+      const paid = (payItems || []).reduce((a, b) => a + (Number(b.amount) || 0), 0);
+      dto.amountPaid = paid;
+      dto.balance = Math.max(0, (Number(dto.total) || 0) - paid);
+
+      return res.status(201).json(dto);
     }
 
     return res.status(405).end();

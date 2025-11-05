@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { useRouter } from 'next/router';
 import axiosClient from '../config/axios';
-import { Phone, UserPlus, Search, MoreVertical, ShoppingCart } from 'lucide-react';
+import { Phone, UserPlus, Search, MoreVertical, ShoppingCart, Receipt } from 'lucide-react';
 
 // ⬇️ Pull-to-refresh (window)
 import PullToRefreshHeader from '../components/PullToRefreshHeader';
@@ -99,6 +99,11 @@ const ClientPage = () => {
       pathname: '/neworder',
       query: { clientId: id },
     });
+  };
+
+  // ✅ Ir a la cuenta del cliente (abonos, pedidos, saldos)
+  const handleAccount = (id) => {
+    router.push(`/client/${id}/account`);
   };
 
   const stop = (e) => e.stopPropagation();
@@ -292,6 +297,16 @@ const ClientPage = () => {
                         <Phone size={18} />
                       </a>
                     )}
+
+                    {/* NUEVO: botón Cuenta (móvil) */}
+                    <button
+                      onClick={() => handleAccount(c.id)}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-sky-500 text-white hover:bg-sky-600 shadow-sm active:scale-95 transition"
+                      aria-label="Cuenta del cliente"
+                      title="Cuenta del cliente"
+                    >
+                      <Receipt size={18} />
+                    </button>
                   </div>
 
                   <button
@@ -326,6 +341,8 @@ const ClientPage = () => {
                   <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Tipo</th>
                   <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Cartera</th>
                   <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-center">Pedido</th>
+                  {/* NUEVO: columna Cuenta */}
+                  <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-center">Cuenta</th>
                   <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-center">Acciones</th>
                 </tr>
               </thead>
@@ -365,6 +382,18 @@ const ClientPage = () => {
                           title="Nuevo pedido"
                         >
                           <ShoppingCart size={16} />
+                        </button>
+                      </td>
+
+                      {/* NUEVO: Cuenta */}
+                      <td className="px-4 lg:px-6 py-3 text-center">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleAccount(c.id); }}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-sky-500 text-white hover:bg-sky-600 shadow-sm active:scale-95 transition"
+                          aria-label="Cuenta del cliente"
+                          title="Cuenta del cliente"
+                        >
+                          <Receipt size={16} />
                         </button>
                       </td>
 

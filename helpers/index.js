@@ -45,3 +45,44 @@ export function getCouriers({ debug = false } = {}) {
   if (debug) params.debug = '1';
   return axiosClient.get('couriers', { params });
 }
+
+/* ===========================
+ * Pagos / Abonos (Payments)
+ * ===========================
+ * Endpoints previstos:
+ *   GET    /api/payments                (filtros: clientId, from, to, method)
+ *   POST   /api/payments
+ *   PATCH  /api/payments/:id
+ *   DELETE /api/payments/:id
+ *   GET    /api/clients/:id/account     (estado de cuenta del cliente)
+ */
+
+/** Lista de pagos con filtros opcionales (clientId, rangos de fecha, método, etc.) */
+export function getPayments(params) {
+  return axiosClient.get('payments', { params });
+}
+
+/** Lista de pagos por cliente específico (azúcar sobre getPayments) */
+export function getPaymentsByClient(clientId, params = {}) {
+  return axiosClient.get('payments', { params: { clientId, ...params } });
+}
+
+/** Crea un pago (payload { clientId, amount, method, date, note, allocations[] ... }) */
+export function createPayment(payload) {
+  return axiosClient.post('payments', payload);
+}
+
+/** Actualiza un pago existente (monto, fecha, nota, asignaciones, etc.) */
+export function updatePayment(paymentId, payload) {
+  return axiosClient.patch(`payments/${paymentId}`, payload);
+}
+
+/** Elimina un pago por id */
+export function deletePayment(paymentId) {
+  return axiosClient.delete(`payments/${paymentId}`);
+}
+
+/** Estado de cuenta de un cliente (saldo, total adeudado, pagos, movimientos, etc.) */
+export function getClientAccount(clientId, params) {
+  return axiosClient.get(`clients/${clientId}/account`, { params });
+}

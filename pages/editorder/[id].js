@@ -28,16 +28,6 @@ const toPayment = (v) => {
   return x === 'transferencia' ? 'transferencia' : x === 'cheque' ? 'cheque' : 'efectivo';
 };
 
-// fecha: permitir hasta 1 semana atrás
-const weekAgoISO = () => {
-  const d = new Date();
-  d.setDate(d.getDate() - 7);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
-
 // url segura (evita error "Invalid url")
 const toUrlOrNull = (v) => {
   const s = (v ?? '').toString().trim();
@@ -65,6 +55,18 @@ const ownerPill = (o) => {
   return <span className={`${pillCls} ${cls}`}>{label}</span>;
 };
 
+// Helpers número de pedido (como en orders.js)
+const formatOrderNo = (n) => {
+  const num = Number(n);
+  if (Number.isFinite(num) && num >= 0) return `#${String(num).padStart(4, '0')}`;
+  return null;
+};
+const shortFromUUID = (id) =>
+  id ? `#${String(id).replace(/-/g, '').slice(0, 4).toUpperCase()}` : '#—';
+const getOrderCode = (o) =>
+  formatOrderNo(o?.order_no ?? o?.orderNumber ?? o?.number ?? o?.seq) ||
+  shortFromUUID(o?.id);
+
 export default function EditOrder() {
   const router = useRouter();
   const { id } = router.query;
@@ -81,6 +83,7 @@ export default function EditOrder() {
 
   // form state
   const [orderId, setOrderId] = useState('');
+  const [orderNumber, setOrderNumber] = useState(null); // número visible
   const [clientId, setClientId] = useState('');
   const [clientName, setClientName] = useState('');
   const [clientLocal, setClientLocal] = useState('');
@@ -94,38 +97,43 @@ export default function EditOrder() {
   // Ítems (UI)
   const [items, setItems] = useState([]);
 
-  // Barra de agregado (fuera de la tabla/lista)
+  // Barra de agregado
   const [newProd, setNewProd] = useState(null); // {value,label,_raw}
   const [newQty, setNewQty] = useState('0');
   const [newPrice, setNewPrice] = useState('');
 
-  // ---------- carga ----------
+  // ---------- carga RESILIENTE ----------
   useEffect(() => {
+    if (!router.isReady) return;
     if (!id) return;
+
     (async () => {
       try {
         setLoading(true);
         setLoadError('');
 
-        const [{ data: order }, { data: productsList }, couriersRes] = await Promise.all([
-          axiosClient.get(`orders/${id}`),
-          axiosClient.get('products'),
-          axiosClient.get('couriers'),
-        ]);
-
-        setProducts(productsList ?? []);
-        setCouriers((couriersRes?.data ?? []).map((u) => ({ id: u.id, name: u.name })));
-
-        const seller = getCurrentSeller?.();
-        if (seller?.id) {
-          const resC = await getClients(seller.id);
-          setClients(resC?.data ?? []);
-        } else {
-          setClients([]);
+        // 1) Pedido
+        let order;
+        try {
+          const res = await axiosClient.get(`orders/${encodeURIComponent(id)}`);
+          order = res?.data;
+          if (!order) throw new Error('Respuesta vacía del pedido');
+        } catch (e) {
+          console.error('Error cargando pedido:', e?.response?.data || e);
+          const status = e?.response?.status;
+          const detail =
+            e?.response?.data?.error ||
+            e?.response?.data?.message ||
+            e?.message ||
+            'Error desconocido';
+          setLoadError(`No se pudo cargar el pedido (HTTP ${status || '500'}). ${detail}`);
+          setLoading(false);
+          return;
         }
 
-        // set form
+        // Setear form desde el pedido
         setOrderId(order.id);
+        setOrderNumber(order.order_no ?? order.orderNumber ?? order.number ?? order.seq ?? null);
         setClientId(order.clientId || '');
         setClientName(order.clientName || '');
         setClientLocal(order.clientLocal || '');
@@ -145,30 +153,61 @@ export default function EditOrder() {
             }))
           : [];
         setItems(itemsUi);
+
+        // 2) Productos
+        try {
+          const { data: productsList } = await axiosClient.get('products');
+          setProducts(productsList ?? []);
+        } catch (e) {
+          console.warn('No se pudieron cargar productos. Continuando sin ellos:', e?.response?.data || e);
+          setProducts([]);
+        }
+
+        // 3) Repartidores
+        try {
+          const resCour = await axiosClient.get('couriers');
+          setCouriers((resCour?.data ?? []).map((u) => ({ id: u.id, name: u.name })));
+        } catch (e) {
+          console.warn('No se pudieron cargar repartidores. Continuando sin ellos:', e?.response?.data || e);
+          setCouriers([]);
+        }
+
+        // 4) Clientes
+        try {
+          const seller = getCurrentSeller?.();
+          if (seller?.id) {
+            const resC = await getClients(seller.id);
+            setClients(resC?.data ?? []);
+          } else {
+            setClients([]);
+          }
+        } catch (e) {
+          console.warn('No se pudieron cargar clientes. Continuando sin ellos:', e?.response?.data || e);
+          setClients([]);
+        }
+
+        setLoading(false);
       } catch (e) {
         console.error(e);
-        setLoadError('No se pudo cargar el pedido.');
-      } finally {
+        setLoadError('Error inesperado al cargar el formulario.');
         setLoading(false);
       }
     })();
-  }, [id]);
+  }, [router.isReady, id]);
 
-  // Si tenemos el clientId y la lista de clientes, aseguramos el clientOwner (por si no vino en el pedido)
+  // owner por clientId si hace falta
   useEffect(() => {
     if (!clientId || !clients.length) return;
     const c = clients.find((x) => String(x.id) === String(clientId));
     if (!c) return;
     const owner = (c.clientOwner ?? c.client_owner ?? '').toString().toLowerCase();
     setClientOwner(owner);
-    // Refrescamos nombre/local si están vacíos
     if (!clientName) setClientName(c.name || '');
     if (!clientLocal) setClientLocal(c.nombre_local || '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId, clients]);
 
   // ---------- selects ----------
-  // IMPORTANTE: no ofrecer productos que ya estén en la orden
   const productOptions = useMemo(() => {
     const usedIds = new Set(items.map((it) => it.productId));
     return products
@@ -188,6 +227,12 @@ export default function EditOrder() {
         _raw: c,
       })),
     [clients]
+  );
+
+  // ✨ NUEVO: opciones de Repartidor en formato react-select
+  const courierOptions = useMemo(
+    () => [{ value: '', label: '— Elegir —' }, ...couriers.map((u) => ({ value: String(u.id), label: u.name || 'Usuario' }))],
+    [couriers]
   );
 
   // ---------- cambios UI ----------
@@ -222,22 +267,18 @@ export default function EditOrder() {
       return;
     }
 
-    // Si el producto ya existe, solo actualizamos la cantidad (sumamos) y NO duplicamos la fila.
     const idx = items.findIndex((it) => String(it.productId) === String(newProd.value));
     if (idx >= 0) {
       setItems((prev) =>
-        prev.map((it, i) =>
-          i === idx ? { ...it, qty: String(Number(it.qty) + q) } : it
-        )
+        prev.map((it, i) => (i === idx ? { ...it, qty: String(Number(it.qty) + q) } : it))
       );
       setNewProd(null);
-      setNewQty('0');     // vuelve a 0
+      setNewQty('0');
       setNewPrice('');
       Swal.fire('Actualizado', 'Se aumentó la cantidad del producto ya presente.', 'success');
       return;
     }
 
-    // Si no existe, lo añadimos normalmente
     setItems((prev) => [
       ...prev,
       {
@@ -248,7 +289,7 @@ export default function EditOrder() {
       },
     ]);
     setNewProd(null);
-    setNewQty('0');       // vuelve a 0
+    setNewQty('0');
     setNewPrice('');
   };
 
@@ -300,7 +341,7 @@ export default function EditOrder() {
       }
       const pr = Number(it.price);
       if (!Number.isFinite(pr) || pr < 0) {
-        Swal.fire('Precio inválido', 'Ingresa un precio válido (>=0)', 'warning');
+        Swal.fire('Precio inválido', 'Ingresa una precio válido (>=0)', 'warning');
         return false;
       }
     }
@@ -333,10 +374,10 @@ export default function EditOrder() {
       clientName,
       clientLocal,
       status,
-      paymentMethod, // incluye cheque
+      paymentMethod, // 'efectivo' | 'transferencia' | 'cheque'
       invoice,
       deliveredBy: deliveredBy || null,
-      deliveryDate,
+      deliveryDate, // YYYY-MM-DD
       items: builtItems,
       total: builtItems.reduce((a, b) => a + Number(b.subtotal || 0), 0),
     };
@@ -348,7 +389,8 @@ export default function EditOrder() {
       router.push('/orders');
     } catch (e) {
       console.error(e);
-      const msg = e?.response?.data?.error || 'No se pudo actualizar el pedido';
+      const msg =
+        e?.response?.data?.error || e?.response?.data?.message || 'No se pudo actualizar el pedido';
       Swal.fire('Error', msg, 'error');
     } finally {
       setSaving(false);
@@ -373,7 +415,8 @@ export default function EditOrder() {
       router.push('/orders');
     } catch (e) {
       console.error(e);
-      const msg = e?.response?.data?.error || 'No se pudo eliminar el pedido';
+      const msg =
+        e?.response?.data?.error || e?.response?.data?.message || 'No se pudo eliminar el pedido';
       Swal.fire('Error', msg, 'error');
     } finally {
       setDeleting(false);
@@ -385,6 +428,11 @@ export default function EditOrder() {
     return found?.label || '';
   }, [clientOptions, clientId]);
 
+  const headerOrderCode = useMemo(
+    () => getOrderCode({ order_no: orderNumber, id: orderId }),
+    [orderNumber, orderId]
+  );
+
   return (
     <Layout>
       {/* Header */}
@@ -392,6 +440,7 @@ export default function EditOrder() {
         <h1 className="text-2xl font-bold text-coffee tracking-tight">
           Editar <span className="text-brand-600">Pedido</span>
         </h1>
+
         <button
           type="button"
           onClick={() => router.back()}
@@ -405,15 +454,23 @@ export default function EditOrder() {
       </div>
 
       {loading && <p className="text-gray-600">Cargando pedido…</p>}
-      {!loading && loadError && <p className="text-rose-600">{loadError}</p>}
+      {!loading && loadError && <p className="text-rose-600 whitespace-pre-line">{loadError}</p>}
 
       {!loading && !loadError && (
         <div className="mx-auto w-full max-w-3xl">
           <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm relative">
-            {/* MOBILE: pill arriba derecha */}
-            {clientOwner ? (
-              <div className="sm:hidden absolute right-4 top-4">{ownerPill(clientOwner)}</div>
-            ) : null}
+            {/* Badge N° Pedido + Pill Cartera dentro de la tarjeta, arriba a la derecha */}
+            <div className="absolute right-4 top-4 flex items-center gap-2">
+              {(orderId || orderNumber) && (
+                <span
+                  className="inline-flex items-center px-2 py-0.5 rounded-md bg-gray-900 text-white font-mono text-xs tracking-wider ring-1 ring-black/10"
+                  title="Número de pedido"
+                >
+                  {headerOrderCode}
+                </span>
+              )}
+              {clientOwner ? ownerPill(clientOwner) : null}
+            </div>
 
             {/* Cliente */}
             <div className="mb-3">
@@ -440,7 +497,6 @@ export default function EditOrder() {
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm"
                   value={deliveryDate}
                   onChange={(e) => setDeliveryDate(e.target.value)}
-                  min={weekAgoISO()}
                 />
               </div>
 
@@ -470,21 +526,18 @@ export default function EditOrder() {
                 />
               </div>
 
-              {/* Repartidor */}
+              {/* Repartidor — ahora con react-select para que sea igual a los otros */}
               <div>
                 <label className="block text-sm font-medium text-coffee mb-1">Repartidor</label>
-                <select
-                  value={deliveredBy || ''}
-                  onChange={(e) => setDeliveredBy(e.target.value || '')}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600"
-                >
-                  <option value="">— Elegir —</option>
-                  {couriers.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name}
-                    </option>
-                  ))}
-                </select>
+                <Select
+                  options={courierOptions}
+                  value={courierOptions.find((o) => o.value === String(deliveredBy || '')) || courierOptions[0]}
+                  onChange={(opt) => setDeliveredBy(opt?.value || '')}
+                  isSearchable
+                  classNamePrefix="rs"
+                  components={{ IndicatorSeparator: () => null }}
+                  styles={{ control: (b) => ({ ...b, borderColor: '#e5e7eb', boxShadow: 'none', minHeight: 38 }) }}
+                />
               </div>
             </div>
 
@@ -506,7 +559,7 @@ export default function EditOrder() {
               <div className="flex-1 min-w-[220px] w-full">
                 <label className="block text-sm font-medium text-coffee mb-1">Productos del pedido</label>
                 <Select
-                  options={productOptions} // <- ya sin duplicados
+                  options={productOptions}
                   placeholder="Buscar producto…"
                   value={newProd}
                   onChange={setNewProd}

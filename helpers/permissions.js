@@ -33,11 +33,19 @@ export const PERMISSIONS_SCHEMA = {
     },
   },
   sales: {
-    label: 'Ventas',
+    label: 'Ventas / Cobranza',
     actions: {
       view: 'Ver',
       togglePaid: 'Marcar pagado',
       toggleInvoice: 'Marcar facturado',
+    },
+  },
+  clientAccount: {
+    // 👈 NUEVO módulo para la pantalla /client/[id]/account
+    label: 'Cuenta del Cliente',
+    actions: {
+      read: 'Ver cuenta',
+      charge: 'Registrar / eliminar abonos',
     },
   },
   users: {
@@ -52,10 +60,8 @@ export const PERMISSIONS_SCHEMA = {
 };
 
 // ==============================
-// 2) Plantillas por rol
+// helpers internos
 // ==============================
-
-// Helpers de construcción
 export function emptyPermissions() {
   const out = {};
   for (const mod of Object.keys(PERMISSIONS_SCHEMA)) {
@@ -95,35 +101,51 @@ function allFalse() {
   return emptyPermissions();
 }
 
+// ==============================
+// 2) Plantillas por rol
+// ==============================
+
 export const ROLE_TEMPLATES = {
-  admin: allTrue(),
+  admin: allTrue(), // 👈 admin tiene TODO en true, incluyendo clientAccount.read/charge
+
   repartidor: mergeFalse(allFalse(), {
     clients: { view: true, create: true, edit: true },
     orders: { view: true, create: true, edit: true, markDelivered: true },
     products: { view: true },
     sales: { view: true },
-    users: {}, // nada
+    clientAccount: { read: true }, // puede mirar saldo del cliente
+    // nada en users
   }),
+
   vendedor: mergeFalse(allFalse(), {
     clients: { view: true, create: true, edit: true },
     orders: { view: true, create: true, edit: true },
     products: { view: true },
     sales: { view: true, togglePaid: true },
+    clientAccount: { read: true, charge: true }, // vendedor suele cobrar
   }),
+
   supervisor: mergeFalse(allFalse(), {
     clients: { view: true, edit: true },
     orders: { view: true, edit: true, markDelivered: true },
     products: { view: true, edit: true },
     sales: { view: true, togglePaid: true, toggleInvoice: true },
     users: { view: true },
+    clientAccount: { read: true, charge: true },
   }),
-  // role 'client' no usa permisos de backoffice
+
+  // 'produccion' si existe en tu backend, dale lo que quieras o déjalo vacío
+  produccion: mergeFalse(allFalse(), {
+    products: { view: true, edit: true },
+    clients: { view: true },
+    clientAccount: { read: true }, // puede ver cuánto deben pero no cobrar
+  }),
 };
 
 export function templateForRole(role) {
   const r = String(role || '').toLowerCase();
   const tpl = ROLE_TEMPLATES[r] || emptyPermissions();
-  // devolver copia para evitar mutaciones globales
+  // devolver copia para no mutar global
   return JSON.parse(JSON.stringify(tpl));
 }
 
@@ -131,11 +153,11 @@ export function templateForRole(role) {
 // 3) Normalización de permisos/usuario
 // ==============================
 export function normalizePermissions(perms, role) {
-  // Si no vienen permisos, tomamos plantilla por rol
+  // "perms" que venga del backend (obj), o usamos plantilla para el rol
   const base = perms && typeof perms === 'object' ? perms : {};
   const withRole = mergeDeep(templateForRole(role), base);
 
-  // Garantizar todas las claves módulo/acción del esquema
+  // Garantizar todas las llaves del esquema
   const out = {};
   for (const mod of Object.keys(PERMISSIONS_SCHEMA)) {
     out[mod] = {};
@@ -158,16 +180,14 @@ export function normalizeUser(user) {
     email: user.email ?? '',
     role,
     isAdmin: Boolean(isAdm),
-    // permisos normalizados
     permissions: normalizePermissions(user.permissions, role),
-    // metadatos opcionales que podrías usar
-    partnerTag: user.partnerTag ?? null, // "Cecil" / "Padre" / etc.
+    partnerTag: user.partnerTag ?? user.partner_tag ?? null,
     sellerId: user.sellerId ?? user.id ?? null,
   };
 }
 
 // ==============================
-// 4) Acceso seguro a localStorage (SSR-safe)
+// 4) localStorage helpers
 // ==============================
 const LS_KEY = 'userData';
 
@@ -192,7 +212,6 @@ export function setCurrentUser(userObj) {
   }
 }
 
-// Asegura que el usuario guardado quede normalizado (puedes llamarlo en _app o al iniciar sesión)
 export function ensureStoredUserNormalized() {
   if (typeof window === 'undefined') return null;
   const u = getCurrentUser();
@@ -202,7 +221,7 @@ export function ensureStoredUserNormalized() {
 }
 
 // ==============================
-// 5) Chequeos de permisos
+// 5) helpers can / canAny
 // ==============================
 
 export function isAdmin(user = getCurrentUser()) {
@@ -211,11 +230,10 @@ export function isAdmin(user = getCurrentUser()) {
 
 /**
  * can('orders.edit')  o  can('orders','edit')
- * Retorna true si el usuario puede realizar la acción.
  */
 export function can(moduleOrDot, actionOpt, user = getCurrentUser()) {
   if (!user) return false;
-  if (user.isAdmin) return true;
+  if (user.isAdmin) return true; // admin siempre true
 
   let mod = moduleOrDot;
   let act = actionOpt;

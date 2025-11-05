@@ -59,22 +59,34 @@ const partialFromCamel = (o) => {
   if ('deliveryDate' in o || 'delivery_date' in o) r.delivery_date = o.deliveryDate ?? o.delivery_date;
   if ('deliveredAt' in o || 'delivered_at' in o) r.delivered_at = o.deliveredAt ?? o.delivered_at;
 
-  // 👇 normalizamos payment_method sin importar camel/snake ni casing
+  // normalizamos payment_method
   if ('paymentMethod' in o || 'payment_method' in o) {
     const raw = o.paymentMethod ?? o.payment_method;
     r.payment_method = normPM(raw);
   }
 
   if ('invoice' in o) r.invoice = !!o.invoice;
-  if ('invoiceSent' in o || 'invoice_sent' in o) r.invoice_sent = !!(o.invoiceSent ?? o.invoice_sent);
+  if ('invoiceSent' in o || 'invoice_sent' in o)
+    r.invoice_sent = !!(o.invoiceSent ?? o.invoice_sent);
+
   if ('paid' in o) r.paid = !!o.paid;
+
   return r;
 };
 
-// ---------- Validación ----------
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/; // delivery_date es DATE (YYYY-MM-DD)
+// ---------- helper permisos locales ----------
+function userHasPerm(user, permName) {
+  try {
+    requirePerm(user, permName);
+    return true;
+  } catch (_e) {
+    return false;
+  }
+}
 
-// mismo esquema de ítems que usas en POST (/api/orders/index.js)
+// ---------- Validación ----------
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 const itemSchema = z.object({
   product_id: z.union([z.string(), z.number()]),
   name: z.string().min(1),
@@ -90,45 +102,104 @@ const itemSchema = z.object({
     if (!Number.isFinite(n) || n < 0) throw new Error('price inválido');
     return n;
   }),
-  subtotal: z.union([z.number(), z.string()]).optional().nullable(), // se recalcula
+  subtotal: z.union([z.number(), z.string()]).optional().nullable(),
 });
 
-// PATCH: campos parciales + items (opcional)
-const patchSchema = z.object({
-  clientId: z.union([z.number().int(), z.string()]).optional(),
-  client_id: z.union([z.number().int(), z.string()]).optional(),
-  clientName: z.string().optional(),
-  client_name: z.string().optional(),
-  clientLocal: z.string().optional(),
-  client_local: z.string().optional(),
-  sellerId: z.union([z.number().int(), z.string()]).optional(),
-  seller_id: z.union([z.number().int(), z.string()]).optional(),
-  deliveredBy: z.union([z.number().int(), z.string()]).optional(),
-  delivered_by: z.union([z.number().int(), z.string()]).optional(),
-  status: z.enum(['pendiente', 'entregado']).optional(),
-  total: z.union([z.number(), z.string()]).optional(),
-  deliveryDate: z
-    .string()
-    .optional()
-    .refine((v) => !v || DATE_RE.test(v), { message: 'deliveryDate debe ser YYYY-MM-DD' }),
-  delivery_date: z
-    .string()
-    .optional()
-    .refine((v) => !v || DATE_RE.test(v), { message: 'delivery_date debe ser YYYY-MM-DD' }),
-  deliveredAt: z.string().datetime().optional(),
-  delivered_at: z.string().datetime().optional(),
+const patchSchema = z
+  .object({
+    clientId: z.union([z.number().int(), z.string()]).optional(),
+    client_id: z.union([z.number().int(), z.string()]).optional(),
+    clientName: z.string().optional(),
+    client_name: z.string().optional(),
+    clientLocal: z.string().optional(),
+    client_local: z.string().optional(),
+    sellerId: z.union([z.number().int(), z.string()]).optional(),
+    seller_id: z.union([z.number().int(), z.string()]).optional(),
+    deliveredBy: z.union([z.number().int(), z.string()]).optional(),
+    delivered_by: z.union([z.number().int(), z.string()]).optional(),
+    status: z.enum(['pendiente', 'entregado']).optional(),
+    total: z.union([z.number(), z.string()]).optional(),
+    deliveryDate: z
+      .string()
+      .optional()
+      .refine((v) => !v || DATE_RE.test(v), { message: 'deliveryDate debe ser YYYY-MM-DD' }),
+    delivery_date: z
+      .string()
+      .optional()
+      .refine((v) => !v || DATE_RE.test(v), { message: 'delivery_date debe ser YYYY-MM-DD' }),
+    deliveredAt: z.string().datetime().optional(),
+    delivered_at: z.string().datetime().optional(),
 
-  // dejamos string libre y normalizamos después en partialFromCamel
-  paymentMethod: z.string().optional(),
-  payment_method: z.string().optional(),
+    paymentMethod: z.string().optional(),
+    payment_method: z.string().optional(),
 
-  invoice: z.boolean().optional(),
-  invoiceSent: z.boolean().optional(),
-  invoice_sent: z.boolean().optional(),
-  paid: z.boolean().optional(),
-  items: z.array(itemSchema).optional(), // 👈 ahora aceptamos items
-}).refine((val) => Object.keys(val || {}).length > 0, { message: 'Sin cambios' });
+    invoice: z.boolean().optional(),
+    invoiceSent: z.boolean().optional(),
+    invoice_sent: z.boolean().optional(),
+    paid: z.boolean().optional(),
 
+    // ⚠️ NUEVO: bandera para indicar que se deben borrar TODOS los abonos
+    // (sólo usar desde Ventas al poner "No pagado")
+    wipePayments: z.boolean().optional(),
+
+    items: z.array(itemSchema).optional(),
+  })
+  .refine((val) => Object.keys(val || {}).length > 0, { message: 'Sin cambios' });
+
+// ---------- helpers DB ----------
+async function fetchOrderWithItems(orderId) {
+  return supabaseServer
+    .from('orders')
+    .select(`
+      id, client_id, client_name, client_local, seller_id, delivered_by,
+      status, total, delivery_date, delivered_at, payment_method,
+      invoice, invoice_sent, paid, created_at, updated_at,
+      order_items ( id, product_id, name, sku, image_url, qty, price, subtotal )
+    `)
+    .eq('id', orderId)
+    .maybeSingle();
+}
+
+async function sumPaidForOrder(orderId) {
+  const { data, error } = await supabaseServer
+    .from('payment_items')
+    .select('amount')
+    .eq('order_id', orderId);
+
+  if (error) throw error;
+  return (data || []).reduce((acc, it) => acc + (Number(it.amount) || 0), 0);
+}
+
+// ---------- helper: borrar todos los abonos de una orden ----------
+async function wipePaymentsForOrder(orderId) {
+  // 1. obtener todos los payment_id que apuntan a esta orden
+  const { data: payItems, error: payItemsErr } = await supabaseServer
+    .from('payment_items')
+    .select('payment_id')
+    .eq('order_id', orderId);
+
+  if (payItemsErr) {
+    throw payItemsErr;
+  }
+
+  const paymentIds = [...new Set((payItems || []).map((pi) => pi.payment_id))];
+
+  if (paymentIds.length === 0) {
+    return; // nada que borrar
+  }
+
+  // 2. borrar esos payments (ON DELETE CASCADE debe volar payment_items asociados)
+  const { error: delErr } = await supabaseServer
+    .from('payments')
+    .delete()
+    .in('id', paymentIds);
+
+  if (delErr) {
+    throw delErr;
+  }
+}
+
+// ---------- main handler ----------
 export default async function handler(req, res) {
   const user = getReqUser(req);
   const { id } = req.query;
@@ -137,35 +208,174 @@ export default async function handler(req, res) {
     if (req.method === 'GET') {
       requirePerm(user, 'orders.read');
 
-      const { data, error } = await supabaseServer
-        .from('orders')
-        .select(`
-          id, client_id, client_name, client_local, seller_id, delivered_by,
-          status, total, delivery_date, delivered_at, payment_method,
-          invoice, invoice_sent, paid, created_at, updated_at,
-          order_items ( id, product_id, name, sku, image_url, qty, price, subtotal )
-        `)
-        .eq('id', id)
-        .maybeSingle();
-
+      const { data, error } = await fetchOrderWithItems(id);
       if (error) throw error;
       if (!data) return res.status(404).json({ error: 'Order not found' });
 
-      return res.status(200).json(toCamel(data));
+      const dto = toCamel(data);
+
+      // pagos de esta orden
+      const { data: pi, error: piErr } = await supabaseServer
+        .from('payment_items')
+        .select(`
+          id, payment_id, order_id, amount, created_at,
+          payments ( id, method, paid_at, client_id, created_at )
+        `)
+        .eq('order_id', id);
+
+      if (piErr) throw piErr;
+
+      const payments = (pi || []).map((row) => {
+        const payMethod = row.payments?.method ?? null;
+        return {
+          id: row.payment_id,
+          itemId: row.id,
+          amount: Number(row.amount) || 0,
+          createdAt: row.created_at,
+          method: payMethod,
+          type: payMethod,
+          reference: null,
+          paidAt: row.payments?.paid_at || null,
+          memo: null,
+        };
+      });
+
+      const amountPaid = payments.reduce((acc, p) => acc + (p.amount || 0), 0);
+      const total = Number(dto.total) || 0;
+
+      dto.payments = payments;
+      dto.amountPaid = amountPaid;
+      dto.balance = Math.max(0, total - amountPaid);
+
+      return res.status(200).json(dto);
     }
 
     if (req.method === 'PATCH') {
-      requirePerm(user, 'orders.update');
-
+      // VALIDAR INPUT
       const body = patchSchema.parse(req.body || {});
       const patch = partialFromCamel(body);
 
-      // Si pasa a "entregado" y no viene delivered_at, lo seteamos ahora
+      // ----- permisos granulares -----
+      const touchesPaymentMethod =
+        Object.prototype.hasOwnProperty.call(body, 'paymentMethod') ||
+        Object.prototype.hasOwnProperty.call(body, 'payment_method');
+
+      const touchesInvoice =
+        Object.prototype.hasOwnProperty.call(body, 'invoice') ||
+        Object.prototype.hasOwnProperty.call(body, 'invoiceSent') ||
+        Object.prototype.hasOwnProperty.call(body, 'invoice_sent');
+
+      const touchesPaid =
+        Object.prototype.hasOwnProperty.call(body, 'paid');
+
+      const touchesStructural =
+        Object.prototype.hasOwnProperty.call(body, 'clientId') ||
+        Object.prototype.hasOwnProperty.call(body, 'client_id') ||
+        Object.prototype.hasOwnProperty.call(body, 'clientName') ||
+        Object.prototype.hasOwnProperty.call(body, 'client_name') ||
+        Object.prototype.hasOwnProperty.call(body, 'clientLocal') ||
+        Object.prototype.hasOwnProperty.call(body, 'client_local') ||
+        Object.prototype.hasOwnProperty.call(body, 'sellerId') ||
+        Object.prototype.hasOwnProperty.call(body, 'seller_id') ||
+        Object.prototype.hasOwnProperty.call(body, 'deliveredBy') ||
+        Object.prototype.hasOwnProperty.call(body, 'delivered_by') ||
+        Object.prototype.hasOwnProperty.call(body, 'status') ||
+        Object.prototype.hasOwnProperty.call(body, 'total') ||
+        Object.prototype.hasOwnProperty.call(body, 'deliveryDate') ||
+        Object.prototype.hasOwnProperty.call(body, 'delivery_date') ||
+        Object.prototype.hasOwnProperty.call(body, 'deliveredAt') ||
+        Object.prototype.hasOwnProperty.call(body, 'delivered_at') ||
+        Object.prototype.hasOwnProperty.call(body, 'items');
+
+      if (touchesStructural) {
+        requirePerm(user, 'orders.update');
+      }
+      if (touchesPaymentMethod) {
+        requirePerm(user, 'sales.update_payment');
+      }
+      if (touchesInvoice) {
+        requirePerm(user, 'sales.update_invoice');
+      }
+      if (touchesPaid) {
+        const canMarkPaid =
+          userHasPerm(user, 'sales.mark_paid') ||
+          userHasPerm(user, 'client.account.charge');
+
+        if (!canMarkPaid) {
+          requirePerm(user, 'sales.mark_paid');
+        }
+      }
+
+      // ⚠️ CASO ESPECIAL: paid === false
+      // - Si viene wipePayments:true -> limpiar abonos y marcar no pagado (flujo Ventas).
+      // - Si NO viene wipePayments -> sólo marcar no pagado (flujo Account al borrar un abono).
+      if (body.paid === false) {
+        const mustWipe = body.wipePayments === true;
+        console.log('[orders PATCH] paid:false', { orderId: id, wipe: mustWipe });
+
+        if (mustWipe) {
+          await wipePaymentsForOrder(id);
+        }
+
+        // actualizar la orden a paid:false
+        const { data: updatedOrder, error: upErr } = await supabaseServer
+          .from('orders')
+          .update({ paid: false })
+          .eq('id', id)
+          .select(`
+            id, client_id, client_name, client_local, seller_id, delivered_by,
+            status, total, delivery_date, delivered_at, payment_method,
+            invoice, invoice_sent, paid, created_at, updated_at,
+            order_items ( id, product_id, name, sku, image_url, qty, price, subtotal )
+          `)
+          .maybeSingle();
+
+        if (upErr) throw upErr;
+        if (!updatedOrder) return res.status(404).json({ error: 'Order not found' });
+
+        // recalcular dto
+        const dtoNoPays = toCamel(updatedOrder);
+
+        // Traer pagos actuales (si hubo wipe, ya no habrá; si no hubo wipe, se conservan)
+        const { data: pi3, error: piErr3 } = await supabaseServer
+          .from('payment_items')
+          .select(`
+            id, payment_id, order_id, amount, created_at,
+            payments ( id, method, paid_at, client_id, created_at )
+          `)
+          .eq('order_id', id);
+        if (piErr3) throw piErr3;
+
+        const payments3 = (pi3 || []).map((row) => ({
+          id: row.payment_id,
+          itemId: row.id,
+          amount: Number(row.amount) || 0,
+          createdAt: row.created_at,
+          method: row.payments?.method ?? null,
+          type: row.payments?.method ?? null,
+          reference: null,
+          paidAt: row.payments?.paid_at || null,
+          memo: null,
+        }));
+
+        const amountPaid = payments3.reduce((a, b) => a + (Number(b.amount) || 0), 0);
+        const total = Number(dtoNoPays.total) || 0;
+
+        dtoNoPays.payments = payments3;
+        dtoNoPays.amountPaid = amountPaid;
+        dtoNoPays.balance = Math.max(0, total - amountPaid);
+
+        return res.status(200).json(dtoNoPays);
+      }
+
+      // --- flujo normal PATCH (incluye paid === true, invoice, etc.) ---
+
+      // Si pasa a "entregado" y no viene delivered_at, seteamos timestamp ahora
       if (patch.status === 'entregado' && !('delivered_at' in patch)) {
         patch.delivered_at = new Date().toISOString();
       }
 
-      // Si vienen items, recalculamos subtotales y el total de la orden
+      // Si vienen items, recalculamos items y total
       let itemsToInsert = null;
       if (Array.isArray(body.items)) {
         const normalized = body.items.map((i) => {
@@ -185,28 +395,26 @@ export default async function handler(req, res) {
         });
 
         itemsToInsert = normalized;
-        const total = normalized.reduce((acc, it) => acc + (Number(it.subtotal) || 0), 0);
-        patch.total = toIntOrNull(total);
+        const newTotal = normalized.reduce((acc, it) => acc + (Number(it.subtotal) || 0), 0);
+        patch.total = toIntOrNull(newTotal);
       }
 
-      // 1) actualizar la orden (campos básicos y, si corresponde, el total recalculado)
+      // 1) update base de la orden
       const upd = await supabaseServer
         .from('orders')
         .update(patch)
         .eq('id', id)
-        .select(
-          `
+        .select(`
           id, client_id, client_name, client_local, seller_id, delivered_by,
           status, total, delivery_date, delivered_at, payment_method,
           invoice, invoice_sent, paid, created_at, updated_at
-        `
-        )
+        `)
         .maybeSingle();
 
       if (upd.error) throw upd.error;
       if (!upd.data) return res.status(404).json({ error: 'Order not found' });
 
-      // 2) si vinieron items, reemplazarlos
+      // 2) si hay items -> reemplazar
       if (itemsToInsert) {
         const del = await supabaseServer.from('order_items').delete().eq('order_id', id);
         if (del.error) throw del.error;
@@ -217,21 +425,87 @@ export default async function handler(req, res) {
         }
       }
 
-      // 3) devolver la orden completa
-      const { data: full, error: selErr } = await supabaseServer
-        .from('orders')
-        .select(`
-          id, client_id, client_name, client_local, seller_id, delivered_by,
-          status, total, delivery_date, delivered_at, payment_method,
-          invoice, invoice_sent, paid, created_at, updated_at,
-          order_items ( id, product_id, name, sku, image_url, qty, price, subtotal )
-        `)
-        .eq('id', id)
-        .maybeSingle();
+      // 2.5) Si se marcó paid === true ahora, crear abono automático por saldo pendiente
+      if (body.paid === true) {
+        const currentOrder = upd.data; // ya tiene total/payment_method/client_id
+        const totalNow = Number(currentOrder.total) || 0;
+        const paidSoFar = await sumPaidForOrder(id);
+        const balance = Math.max(0, totalNow - paidSoFar);
 
+        if (balance > 0) {
+          const methodFromBody = normPM(body.paymentMethod ?? body.payment_method);
+          const method =
+            methodFromBody ||
+            normPM(currentOrder.payment_method) ||
+            'efectivo';
+
+          // crear payment
+          const { data: createdPay, error: payErr } = await supabaseServer
+            .from('payments')
+            .insert({
+              client_id: currentOrder.client_id,
+              method,
+              amount_total: balance,
+              note: 'Pago automático: marcado como pagado',
+              paid_at: new Date().toISOString(),
+            })
+            .select('id,client_id,method,amount_total,paid_at,note,created_at,updated_at')
+            .single();
+
+          if (payErr) throw payErr;
+
+          // crear payment_item linkeando esta orden
+          const { error: itErr } = await supabaseServer
+            .from('payment_items')
+            .insert({
+              payment_id: createdPay.id,
+              order_id: id,
+              amount: balance,
+              note: null,
+            });
+
+          if (itErr) throw itErr;
+        }
+      }
+
+      // 3) devolver la orden completa post-update con pagos actuales
+      const { data: full, error: selErr } = await fetchOrderWithItems(id);
       if (selErr) throw selErr;
 
-      return res.status(200).json(toCamel(full));
+      const dto = toCamel(full);
+
+      const { data: pi2, error: piErr2 } = await supabaseServer
+        .from('payment_items')
+        .select(`
+          id, payment_id, order_id, amount, created_at,
+          payments ( id, method, paid_at, client_id, created_at )
+        `)
+        .eq('order_id', id);
+
+      if (piErr2) throw piErr2;
+
+      const payments2 = (pi2 || []).map((row) => {
+        const payMethod = row.payments?.method ?? null;
+        return {
+          id: row.payment_id,
+          itemId: row.id,
+          amount: Number(row.amount) || 0,
+          createdAt: row.created_at,
+          method: payMethod,
+          type: payMethod,
+          reference: null,
+          paidAt: row.payments?.paid_at || null,
+          memo: null,
+        };
+      });
+
+      const amountPaid = payments2.reduce((a, b) => a + (Number(b.amount) || 0), 0);
+      const total = Number(dto.total) || 0;
+      dto.payments = payments2;
+      dto.amountPaid = amountPaid;
+      dto.balance = Math.max(0, total - amountPaid);
+
+      return res.status(200).json(dto);
     }
 
     if (req.method === 'DELETE') {
