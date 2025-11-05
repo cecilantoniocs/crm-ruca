@@ -208,7 +208,7 @@ function Modal({ open, onClose, children, title }) {
       <div className="absolute inset-0 flex items-center justify-center p-4">
         <div className="w-full max-w-lg rounded-2xl border border-gray-200 bg-white shadow-xl">
           <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-coffee">{title}</h3>
+            <h3 className="text-lg font-semibold text-coffee-900">{title}</h3>
             <button
               type="button"
               onClick={onClose}
