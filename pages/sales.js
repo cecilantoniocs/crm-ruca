@@ -1,4 +1,8 @@
-// pages/sales.js
+// /pages/sales.js
+// Rework: método de pago con toggle, header móvil (local arriba, persona abajo + ícono cuenta),
+// KPIs avanzados detrás del permiso sales.kpis.view y "Total" -> "Ingresos".
+// Fixes: gating por permisos + payload camelCase+snake_case para parches robustos.
+
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { useRouter } from 'next/router';
@@ -11,12 +15,12 @@ import {
   Truck,
   Users as UsersIcon,
   ExternalLink,
-  MoreVertical, // lo dejamos importado aunque ya no se muestre, no molesta
   CreditCard,
 } from 'lucide-react';
 
 import PullToRefreshHeader from '../components/PullToRefreshHeader';
 import usePullToRefreshWindow from '../hooks/usePullToRefreshWindow';
+import { getCurrentUser, can, isAdmin } from '../helpers/permissions';
 
 // ---------- Supabase REST client (lectura vistas) ----------
 const supa = (() => {
@@ -122,18 +126,46 @@ const formatOrderNumberRaw = (o) => {
 };
 
 // Etiqueta estilo negro
-const OrderNumberTag = ({ order }) => {
-  const txt = formatOrderNumberRaw(order);
-  return (
-    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-gray-900 text-white">
-      {txt}
-    </span>
-  );
+const OrderNumberTag = ({ order }) => (
+  <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-gray-900 text-white">
+    {formatOrderNumberRaw(order)}
+  </span>
+);
+
+// helpers toggle
+const nextPaymentMethod = (curr) => {
+  const v = paymentToString(curr);
+  if (v === 'efectivo') return 'transferencia';
+  if (v === 'transferencia') return 'cheque';
+  return 'efectivo';
+};
+
+// Helper: fusiona camelCase + snake_case para compatibilidad backend
+const withSnake = (obj = {}, extra = {}) => {
+  const out = { ...obj, ...extra };
+  if ('paymentMethod' in obj) out.payment_method = obj.paymentMethod;
+  if ('invoiceSent'   in obj) out.invoice_sent   = obj.invoiceSent;
+  if ('clientOwner'   in obj) out.client_owner   = obj.clientOwner;
+  if ('deliveredBy'   in obj) out.delivered_by   = obj.deliveredBy;
+  return out;
 };
 
 // ------------ componente ------------
 const SalesPage = () => {
   const router = useRouter();
+
+  // permisos
+  const me = useMemo(() => getCurrentUser(), []);
+  const canViewSales = useMemo(() => isAdmin(me) || can('sales.view', null, me), [me]);
+  const canViewKpis  = useMemo(
+    () => isAdmin(me) || can('sales.kpis.view', null, me) || can('sales.kpis', null, me),
+    [me]
+  );
+
+  // acciones granulares
+  const canMarkPaid     = useMemo(() => isAdmin(me) || can('sales.markPaid', null, me), [me]);
+  const canUpdatePayMet = useMemo(() => isAdmin(me) || can('sales.updatePayment', null, me), [me]);
+  const canUpdateInv    = useMemo(() => isAdmin(me) || can('sales.updateInvoice', null, me), [me]);
 
   // Datos
   const [orders, setOrders] = useState([]);
@@ -150,7 +182,7 @@ const SalesPage = () => {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
 
-  // cartera (clientOwner), repartidor y método de pago
+  // cartera, repartidor, método de pago
   const [ownerFilter, setOwnerFilter] = useState('all'); // 'all' | 'rucapellan' | 'cecil'
   const [courierFilter, setCourierFilter] = useState('all'); // 'all' | <courierId>
   const [paymentFilter, setPaymentFilter] = useState('all'); // 'all' | 'efectivo' | 'transferencia' | 'cheque'
@@ -159,15 +191,10 @@ const SalesPage = () => {
   const [invoiceFilter, setInvoiceFilter] = useState('all'); // 'all' | 'facturado' | 'no_facturado' | 'sin_factura'
   const [paidFilter, setPaidFilter] = useState('all'); // 'all' | 'pagado' | 'no_pagado'
 
-  // usar SIEMPRE deliveryDate
   const oDate = (o) => o.deliveryDate || '';
-
-  // Dropdowns desktop
-  const [openPaymentId, setOpenPaymentId] = useState(null);
   const [openInvoiceId, setOpenInvoiceId] = useState(null);
 
-  // Menú móvil contextual
-  const [mobileMenu, setMobileMenu] = useState(null); // { id, kind: 'payment'|'invoice', left, top }
+  const { headerProps } = usePullToRefreshWindow({ onRefresh: () => refetch(), threshold: 60 });
 
   // --- fetch server-side desde /api/sales ---
   const refetch = useCallback(async () => {
@@ -184,6 +211,7 @@ const SalesPage = () => {
         paymentMethod: paymentFilter !== 'all' ? paymentFilter : undefined,
         invoice: invoiceFilter !== 'all' ? invoiceFilter : undefined,
         paid: paidFilter !== 'all' ? paidFilter : undefined,
+        status: 'entregado', // el backend igual lo fuerza
       };
 
       const [resSales, resClients, resUsers] = await Promise.all([
@@ -229,7 +257,7 @@ const SalesPage = () => {
     [users]
   );
 
-  // Rango auto (fijamos YYYY-MM-DD en local)
+  // Rango auto (YYYY-MM-DD)
   useEffect(() => {
     if (quickRange === 'range') return;
     const now = new Date();
@@ -262,28 +290,14 @@ const SalesPage = () => {
   const refreshOneFromView = useCallback(async (id) => {
     try {
       const qs = new URLSearchParams();
-      qs.set(
-        'select',
-        [
-          'id',
-          'total',
-          'paid',
-          'delivery_date',
-          'client_id',
-          'client_name',
-          'client_local',
-          'delivered_by',
-          'payment_method',
-          'invoice',
-          'invoice_sent',
-          'client_owner',
-          'paid_sum',
-          'remaining',
-          'items',
-        ].join(',')
-      );
+      qs.set('select', [
+        'id','total','paid','delivery_date','client_id','client_name','client_local',
+        'delivered_by','payment_method','invoice','invoice_sent','client_owner',
+        'paid_sum','remaining','items','status'
+      ].join(','));
       qs.set('id', `eq.${id}`);
 
+      // misma vista (ya filtrada a entregados en el servidor)
       const res = await supa.get(`/sales_with_payments_items?${qs.toString()}`);
       const fresh = Array.isArray(res?.data) ? res.data[0] : null;
 
@@ -314,6 +328,7 @@ const SalesPage = () => {
           )
         ),
         items: Array.isArray(fresh.items) ? fresh.items : [],
+        status: fresh.status,
       };
 
       setOrders((prev) => prev.map((o) => (o.id === id ? normalized : o)));
@@ -323,7 +338,7 @@ const SalesPage = () => {
     }
   }, [refetch]);
 
-  // Filtrado (memoria, sobre lo que ya vino filtrado del server)
+  // Filtrado (ya viene ENTREGADO desde el API; no se filtra por status aquí)
   const filtered = useMemo(() => {
     let rows = orders;
 
@@ -348,8 +363,8 @@ const SalesPage = () => {
 
     if (fromDate && toDate) {
       rows = rows.filter((o) => {
-        const dYMD = String(oDate(o) || '').slice(0, 10); // 'YYYY-MM-DD'
-        return dYMD >= fromDate && dYMD <= toDate;        // compare como texto
+        const dYMD = String(oDate(o) || '').slice(0, 10);
+        return dYMD >= fromDate && dYMD <= toDate;
       });
     }
 
@@ -384,19 +399,9 @@ const SalesPage = () => {
     const sum = filtered.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
     const unpaid = filtered.filter((o) => !o.paid).length;
     const unpaidAmount = filtered.reduce((acc, o) => acc + (Number(o.remaining) || 0), 0);
-
-    // ahora "Facturadas" mostrará las NO facturadas (invoice=true, invoiceSent=false)
-    const notInvoiced = filtered.filter(
-      (o) => !!o.invoice && !o.invoiceSent
-    ).length;
-
+    const noInvoiced = filtered.filter((o) => !!o.invoice && !o.invoiceSent).length;
     const products = filtered.reduce(
-      (acc, o) =>
-        acc +
-        ((o.items ?? []).reduce(
-          (s, it) => s + (Number(it.qty) || 0),
-          0
-        )),
+      (acc, o) => acc + ((o.items ?? []).reduce((s, it) => s + (Number(it.qty) || 0), 0)),
       0
     );
 
@@ -405,77 +410,72 @@ const SalesPage = () => {
       sum,
       unpaid,
       unpaidAmount,
-      invoiced: notInvoiced, // ojo: ahora es "no facturadas"
+      noInvoiced,
       products,
     };
   }, [filtered]);
 
-  // Patch local helper
+  // Helpers patch
   const applyLocal = (id, patch) =>
     setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, ...patch } : o)));
 
   // Toggle pagado/no pagado
-  const togglePaid = async (id) => {
+// ✅ Repara borrado de abonos al pasar a "No pagado"
+const togglePaid = async (id) => {
+  if (!canMarkPaid) return;
+  const prev = orders.find((o) => o.id === id);
+  if (!prev) return;
+
+  const newPaid = !prev.paid;
+
+  // Optimista para KPIs
+  if (!newPaid) {
+    applyLocal(id, { paid: false, paidSum: 0, remaining: Number(prev.total) || 0 });
+  } else {
+    applyLocal(id, { paid: true, remaining: 0 });
+  }
+
+  try {
+    const payload = newPaid
+      // Al marcar pagado: crea abono automático con el método actual
+      ? withSnake({ paid: true, paymentMethod: paymentToString(prev.paymentMethod) }, { action: 'mark_paid' })
+      // Al marcar NO pagado: borra todos los abonos (flag que espera tu API)
+      : withSnake({ paid: false }, { wipePayments: true, action: 'mark_paid' });
+
+    await axiosClient.patch(`orders/${id}`, payload);
+    await refreshOneFromView(id);
+  } catch (e) {
+    console.error(e);
+    // Revertir si falla
+    applyLocal(id, { paid: prev.paid, paidSum: prev.paidSum, remaining: prev.remaining });
+    alert('No se pudo actualizar "Pago".');
+  }
+};
+
+
+  // Toggle cíclico método de pago
+  const cyclePayment = async (id) => {
+    if (!canUpdatePayMet) return;
     const prev = orders.find((o) => o.id === id);
     if (!prev) return;
+    const next = nextPaymentMethod(prev.paymentMethod);
 
-    const newPaid = !prev.paid;
-
-    // Actualización optimista para que el KPI "Total por cobrar" no quede en 0 cuando pase a "No pagado"
-    if (!newPaid) {
-      applyLocal(id, {
-        paid: false,
-        paidSum: 0,
-        remaining: Number(prev.total) || 0,
-      });
-    } else {
-      applyLocal(id, {
-        paid: true,
-        remaining: 0,
-      });
-    }
+    // Optimista
+    applyLocal(id, { paymentMethod: next });
 
     try {
-      const payload = { paid: newPaid };
-
-      // Si viene desde Ventas a "No pagado", borramos TODOS los abonos
-      if (!newPaid) {
-        payload.wipePayments = true;
-      } else {
-        // Si marcamos "Pagado", pasamos el método actual para el abono automático
-        payload.paymentMethod = paymentToString(prev.paymentMethod);
-      }
-
-      await axiosClient.patch(`orders/${id}`, payload);
+      await axiosClient.patch(`orders/${id}`, withSnake({ paymentMethod: next }, { action: 'update_payment' }));
       await refreshOneFromView(id);
     } catch (e) {
       console.error(e);
-      // Revertir al estado anterior si falla
-      applyLocal(id, {
-        paid: prev.paid,
-        paidSum: prev.paidSum,
-        remaining: prev.remaining,
-      });
-      alert('No se pudo actualizar "Pago".');
-    }
-  };
-
-  const updatePaymentMethod = async (id, newMethod) => {
-    const prev = orders.find((o) => o.id === id);
-    if (!prev) return;
-    const method = paymentToString(newMethod);
-    applyLocal(id, { paymentMethod: method });
-    try {
-      await axiosClient.patch(`orders/${id}`, { paymentMethod: method });
-      // opcional: refrescar para mantener consistencia con vistas agregadas
-      await refreshOneFromView(id);
-    } catch (e) {
-      console.error(e);
+      // revert
       applyLocal(id, { paymentMethod: prev.paymentMethod });
+      alert('No se pudo actualizar el método de pago.');
     }
   };
 
   const updateInvoiceStatus = async (id, state) => {
+    if (!canUpdateInv) return;
     const prev = orders.find((o) => o.id === id);
     if (!prev) return;
 
@@ -490,16 +490,21 @@ const SalesPage = () => {
 
     applyLocal(id, patch);
     try {
-      await axiosClient.patch(`orders/${id}`, patch);
+      await axiosClient.patch(
+        `orders/${id}`,
+        withSnake(patch, { action: 'update_invoice' })
+      );
       await refreshOneFromView(id);
     } catch (e) {
       console.error(e);
       applyLocal(id, { invoice: prev.invoice, invoiceSent: prev.invoiceSent });
+      alert('No se pudo actualizar la factura.');
     }
   };
 
   // Toggle rápido SOLO móvil: Facturada <-> No facturada (bloqueado si Sin factura)
   const toggleInvoiceMobile = async (id) => {
+    if (!canUpdateInv) return;
     const prev = orders.find((o) => o.id === id);
     if (!prev) return;
     if (!prev.invoice) return; // Sin factura => bloqueado
@@ -509,11 +514,12 @@ const SalesPage = () => {
     // Optimista
     applyLocal(id, next);
     try {
-      await axiosClient.patch(`orders/${id}`, next);
+      await axiosClient.patch(`orders/${id}`, withSnake(next, { action: 'update_invoice' }));
       await refreshOneFromView(id);
     } catch (e) {
       console.error(e);
       applyLocal(id, { invoice: prev.invoice, invoiceSent: prev.invoiceSent });
+      alert('No se pudo actualizar la factura.');
     }
   };
 
@@ -540,8 +546,6 @@ const SalesPage = () => {
     return `${pillCls} ${color} ${sizing}`;
   };
 
-  const { headerProps } = usePullToRefreshWindow({ onRefresh: refetch, threshold: 60 });
-
   const goClientAccount = (clientId) => {
     if (!clientId) return;
     router.push(`/client/${clientId}/account`);
@@ -549,9 +553,7 @@ const SalesPage = () => {
 
   useEffect(() => {
     const close = () => {
-      setOpenPaymentId(null);
       setOpenInvoiceId(null);
-      setMobileMenu(null);
     };
     const onDocDown = () => close();
     document.addEventListener('pointerdown', onDocDown);
@@ -559,16 +561,6 @@ const SalesPage = () => {
   }, []);
 
   const stopPD = (e) => e.stopPropagation();
-
-  const openMobileMenu = (e, order, kind) => {
-    e.stopPropagation();
-    const rect = e.currentTarget.getBoundingClientRect();
-    const menuWidth = 176;
-    const gap = 6;
-    const top = rect.bottom + gap;
-    const left = Math.min(rect.left, Math.max(8, window.innerWidth - menuWidth - 8));
-    setMobileMenu({ id: order.id, kind, left, top });
-  };
 
   return (
     <Layout>
@@ -580,33 +572,41 @@ const SalesPage = () => {
           Panel de <span className="text-brand-700">Ventas</span>
         </h1>
 
-        <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
-          <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
-            <div className="text-gray-500">Ventas</div>
-            <div className="font-semibold text-coffee-900">{totals.count}</div>
+        {canViewSales && (
+          <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
+            {/* Básicos */}
+            <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+              <div className="text-gray-500">Ventas</div>
+              <div className="font-semibold text-coffee-900">{totals.count}</div>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+              <div className="text-gray-500">Productos vendidos</div>
+              <div className="font-semibold text-coffee-900">{totals.products}</div>
+            </div>
+
+            {/* Avanzados */}
+            {canViewKpis && (
+              <>
+                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+                  <div className="text-gray-500">No pagadas</div>
+                  <div className="font-semibold text-rose-700">{totals.unpaid}</div>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+                  <div className="text-gray-500">No facturadas</div>
+                  <div className="font-semibold text-rose-700">{totals.noInvoiced}</div>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+                  <div className="text-gray-500">Total por cobrar</div>
+                  <div className="font-semibold text-rose-700">{CLP.format(totals.unpaidAmount)}</div>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+                  <div className="text-gray-500">Ingresos</div>
+                  <div className="font-semibold text-coffee-900">{CLP.format(totals.sum)}</div>
+                </div>
+              </>
+            )}
           </div>
-          <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
-            <div className="text-gray-500">Total</div>
-            <div className="font-semibold text-coffee-900">{CLP.format(totals.sum)}</div>
-          </div>
-          <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
-            <div className="text-gray-500">No pagadas</div>
-            <div className="font-semibold text-rose-700">{totals.unpaid}</div>
-          </div>
-          <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
-            <div className="text-gray-500">Total por cobrar</div>
-            <div className="font-semibold text-rose-700">{CLP.format(totals.unpaidAmount)}</div>
-          </div>
-          <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
-            {/* sigue diciendo "Facturadas" pero muestra las NO facturadas y en rojo */}
-            <div className="text-gray-500">No facturadas</div>
-            <div className="font-semibold text-rose-700">{totals.invoiced}</div>
-          </div>
-          <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
-            <div className="text-gray-500">Productos vendidos</div>
-            <div className="font-semibold text-coffee-900">{totals.products}</div>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Filtros */}
@@ -759,6 +759,9 @@ const SalesPage = () => {
               );
               const totalDisplay = CLP.format(Number(o.total) || sumItems);
 
+              const localTxt = o.clientLocal || '—';
+              const personTxt = o.clientName || '—';
+
               return (
                 <div
                   key={o.id}
@@ -770,10 +773,14 @@ const SalesPage = () => {
                 >
                   <div className="flex items-start justify-between">
                     <div className="pr-2">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm text-gray-700">
-                          {o.clientLocal || '—'}
-                        </p>
+                      {/* LOCAL ARRIBA */}
+                      <h3 className="text-base font-semibold text-coffee-900 leading-tight break-words">
+                        {localTxt}
+                      </h3>
+
+                      {/* Persona abajo + cuenta */}
+                      <div className="mt-0.5 flex items-center gap-2 text-sm text-gray-700">
+                        <span className="truncate max-w-[60vw]">{personTxt}</span>
                         {o.clientId && (
                           <button
                             type="button"
@@ -787,9 +794,6 @@ const SalesPage = () => {
                           </button>
                         )}
                       </div>
-                      <h3 className="text-base font-semibold text-coffee-900">
-                        {o.clientName || '—'}
-                      </h3>
                     </div>
                     <div className="shrink-0 flex items-center gap-2">
                       <OrderNumberTag order={o} />
@@ -831,28 +835,35 @@ const SalesPage = () => {
                   </div>
 
                   <div className="mt-3 flex flex-col gap-2">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {/* Método de pago (abre menú móvil con kind='payment') */}
+                    <div className="flex items-center gap-3 flex-wrap">
+                      {/* MÉTODO DE PAGO */}
                       <button
                         type="button"
                         onPointerDown={(e) => e.stopPropagation()}
-                        onClick={(e) => openMobileMenu(e, o, 'payment')}
-                        className="inline-flex items-center gap-2"
-                        title="Cambiar método de pago"
+                        onClick={() => canUpdatePayMet && cyclePayment(o.id)}
+                        className={`inline-flex items-center gap-2 ${!canUpdatePayMet ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        title={canUpdatePayMet ? 'Cambiar método de pago' : 'Sin permiso'}
+                        disabled={!canUpdatePayMet}
                       >
                         <PaymentPill value={o.paymentMethod} size="sm" />
                       </button>
 
-                      {/* Factura: en móvil alterna entre facturada / no facturada; bloqueado si 'Sin factura' */}
+                      {/* Factura móvil */}
                       {(() => {
-                        const disabled = !o.invoice; // "Sin factura" => bloquear
+                        const disabled = !o.invoice || !canUpdateInv; // sin factura o sin permiso
                         return (
                           <button
                             type="button"
                             onPointerDown={(e) => e.stopPropagation()}
                             onClick={() => !disabled && toggleInvoiceMobile(o.id)}
                             className={`inline-flex items-center gap-2 ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
-                            title={disabled ? 'Sin factura (cámbialo solo desde Orders)' : 'Alternar Facturada / No facturada'}
+                            title={
+                              !canUpdateInv
+                                ? 'Sin permiso'
+                                : !o.invoice
+                                ? 'Sin factura (cámbialo solo desde Orders)'
+                                : 'Alternar Facturada / No facturada'
+                            }
                             disabled={disabled}
                           >
                             <span className={invCls}>{invLabel}</span>
@@ -864,10 +875,11 @@ const SalesPage = () => {
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onPointerDown={stopPD}
-                        onClick={() => togglePaid(o.id)}
-                        className={paidPillCls(o.paid, 'sm')}
-                        title="Marcar pago"
+                        onPointerDown={((e) => e.stopPropagation())}
+                        onClick={() => canMarkPaid && togglePaid(o.id)}
+                        className={`${paidPillCls(o.paid, 'sm')} ${!canMarkPaid ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        title={canMarkPaid ? 'Marcar pago' : 'Sin permiso'}
+                        disabled={!canMarkPaid}
                       >
                         {o.paid ? 'Pagado' : 'No pagado'}
                       </button>
@@ -943,12 +955,12 @@ const SalesPage = () => {
                       const { label: invLabel, cls: invCls } = invoiceView(o);
                       const localText = o.clientLocal || '—';
 
+                      const canInvBtn = !!o.invoice && canUpdateInv;
+
                       return (
                         <React.Fragment key={o.id}>
                           <tr
-                            className={`${
-                              idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'
-                            } hover:bg-gray-100 transition-colors`}
+                            className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-colors`}
                           >
                             <td className="px-6 py-3 text-sm text-coffee-900 whitespace-nowrap">
                               <OrderNumberTag order={o} />
@@ -998,73 +1010,39 @@ const SalesPage = () => {
                               {items.length}
                             </td>
 
-                            {/* Método de pago (sin los tres puntitos) */}
+                            {/* MÉTODO DE PAGO */}
                             <td className="px-6 py-3 text-sm whitespace-nowrap">
-                              <div className="relative inline-block">
-                                <button
-                                  type="button"
-                                  className="inline-flex items-center gap-2"
-                                  onPointerDown={stopPD}
-                                  onClick={() => {
-                                    setOpenPaymentId((v) => (v === o.id ? null : o.id));
-                                    setOpenInvoiceId(null);
-                                  }}
-                                  title="Cambiar método de pago"
-                                >
-                                  <PaymentPill value={o.paymentMethod} />
-                                </button>
-
-                                {openPaymentId === o.id && (
-                                  <div
-                                    className="absolute top-full left-0 mt-1 w-44 rounded-lg border border-gray-200 bg-white shadow-lg z-50 flex flex-col"
-                                    onPointerDown={stopPD}
-                                  >
-                                    <button
-                                      className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                                      onClick={() => {
-                                        setOpenPaymentId(null);
-                                        updatePaymentMethod(o.id, 'efectivo');
-                                      }}
-                                    >
-                                      Efectivo
-                                    </button>
-                                    <button
-                                      className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                                      onClick={() => {
-                                        setOpenPaymentId(null);
-                                        updatePaymentMethod(o.id, 'transferencia');
-                                      }}
-                                    >
-                                      Transferencia
-                                    </button>
-                                    <button
-                                      className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                                      onClick={() => {
-                                        setOpenPaymentId(null);
-                                        updatePaymentMethod(o.id, 'cheque');
-                                      }}
-                                    >
-                                      Cheque
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
+                              <button
+                                type="button"
+                                className={`inline-flex items-center gap-2 ${!canUpdatePayMet ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                onPointerDown={stopPD}
+                                onClick={() => canUpdatePayMet && cyclePayment(o.id)}
+                                title={canUpdatePayMet ? 'Cambiar método de pago' : 'Sin permiso'}
+                                disabled={!canUpdatePayMet}
+                              >
+                                <PaymentPill value={o.paymentMethod} />
+                              </button>
                             </td>
 
-                            {/* Factura (menu desktop; bloqueado si 'Sin factura') */}
+                            {/* Factura */}
                             <td className="px-6 py-3 text-sm whitespace-nowrap">
                               <div className="relative inline-block">
                                 <button
                                   type="button"
                                   onPointerDown={stopPD}
                                   onClick={() => {
-                                    if (!o.invoice) return; // "Sin factura": no abrir menú
+                                    if (!canInvBtn) return;
                                     setOpenInvoiceId((v) => (v === o.id ? null : o.id));
-                                    setOpenPaymentId(null);
                                   }}
-                                  className={`inline-flex items-center gap-2 ${!o.invoice ? 'opacity-60 cursor-not-allowed' : ''}`}
-                                  title={o.invoice ? 'Cambiar estado de factura' : 'Sin factura (cámbialo solo desde Orders)'}
-                                  disabled={!o.invoice}
+                                  className={`inline-flex items-center gap-2 ${!canInvBtn ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                  title={
+                                    !canUpdateInv
+                                      ? 'Sin permiso'
+                                      : !o.invoice
+                                      ? 'Sin factura (cámbialo solo desde Orders)'
+                                      : 'Cambiar estado de factura'
+                                  }
+                                  disabled={!canInvBtn}
                                 >
                                   <span className={invCls}>{invLabel}</span>
                                 </button>
@@ -1074,7 +1052,6 @@ const SalesPage = () => {
                                     className="absolute top-full left-0 mt-1 w-44 rounded-lg border border-gray-200 bg-white shadow-lg z-50 flex flex-col"
                                     onPointerDown={stopPD}
                                   >
-                                    {/* Mostrar "Sin factura" deshabilitado para dejar clara la regla */}
                                     <button
                                       className="w-full text-left px-3 py-2 text-sm opacity-50 cursor-not-allowed"
                                       title="Sin factura se gestiona desde Orders"
@@ -1109,9 +1086,10 @@ const SalesPage = () => {
                               <button
                                 type="button"
                                 onPointerDown={stopPD}
-                                onClick={() => togglePaid(o.id)}
-                                className={`${paidPillCls(o.paid)} inline-flex items-center gap-1`}
-                                title="Marcar pago"
+                                onClick={() => canMarkPaid && togglePaid(o.id)}
+                                className={`${paidPillCls(o.paid)} inline-flex items-center gap-1 ${!canMarkPaid ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                title={canMarkPaid ? 'Marcar pago' : 'Sin permiso'}
+                                disabled={!canMarkPaid}
                               >
                                 {o.paid ? 'Pagado' : 'No pagado'}
                               </button>
@@ -1121,11 +1099,7 @@ const SalesPage = () => {
                             </td>
                           </tr>
 
-                          <tr
-                            className={`${
-                              idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'
-                            }`}
-                          >
+                          <tr className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                             <td colSpan={11} className="px-6 pb-4">
                               <div className="mt-1 rounded-lg border border-amber-200 bg-amber-50 p-4">
                                 <h4 className="text-sm font-semibold text-coffee-900 mb-2">
@@ -1143,30 +1117,20 @@ const SalesPage = () => {
                                       <tr className="text-left text-xs uppercase tracking-wide text-gray-700 border-b border-amber-100">
                                         <th className="py-1 pr-2">Producto</th>
                                         <th className="py-1 pr-2">Cantidad</th>
-                                        <th className="py-1 pr-2 text-right">
-                                          Precio
-                                        </th>
-                                        <th className="py-1 pr-0 text-right">
-                                          Subtotal
-                                        </th>
+                                        <th className="py-1 pr-2 text-right">Precio</th>
+                                        <th className="py-1 pr-0 text-right">Subtotal</th>
                                       </tr>
                                     </thead>
                                     <tbody className="text-sm text-gray-800">
                                       {items.length === 0 && (
                                         <tr>
-                                          <td
-                                            colSpan={4}
-                                            className="py-2 text-gray-600"
-                                          >
+                                          <td colSpan={4} className="py-2 text-gray-600">
                                             Sin productos
                                           </td>
                                         </tr>
                                       )}
                                       {items.map((it, i) => (
-                                        <tr
-                                          key={i}
-                                          className="border-t border-amber-100"
-                                        >
+                                        <tr key={i} className="border-t border-amber-100">
                                           <td className="py-1 pr-2">
                                             {it.name || 'Producto'}
                                           </td>
@@ -1174,16 +1138,12 @@ const SalesPage = () => {
                                             {it.qty}
                                           </td>
                                           <td className="py-1 pr-2 text-right">
-                                            {CLP.format(
-                                              Number(it.price) || 0
-                                            )}
+                                            {CLP.format(Number(it.price) || 0)}
                                           </td>
                                           <td className="py-1 pr-0 text-right">
                                             {CLP.format(
                                               Number(it.subtotal) ||
-                                                (Number(it.qty) *
-                                                  Number(it.price) ||
-                                                  0)
+                                                (Number(it.qty) * Number(it.price) || 0)
                                             )}
                                           </td>
                                         </tr>
@@ -1202,59 +1162,6 @@ const SalesPage = () => {
               </div>
             </div>
           </div>
-
-          {/* Menú contextual móvil */}
-          {mobileMenu && (
-            <>
-              <div
-                className="fixed inset-0 z-[998]"
-                onPointerDown={() => setMobileMenu(null)}
-              />
-              <div
-                className="absolute z-[999] w-44 rounded-lg border border-gray-200 bg-white shadow-lg"
-                style={{ left: mobileMenu.left, top: mobileMenu.top }}
-                onPointerDown={stopPD}
-              >
-                {(() => {
-                  const o = orders.find((x) => x.id === mobileMenu.id);
-                  if (!o) return null;
-                  // Solo menú de método de pago en móvil
-                  if (mobileMenu.kind !== 'payment') return null;
-                  return (
-                    <div className="flex flex-col">
-                      <button
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                        onClick={() => {
-                          setMobileMenu(null);
-                          updatePaymentMethod(o.id, 'efectivo');
-                        }}
-                      >
-                        Efectivo
-                      </button>
-                      <button
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                        onClick={() => {
-                          setMobileMenu(null);
-                          updatePaymentMethod(o.id, 'transferencia');
-                        }}
-                      >
-                        Transferencia
-                      </button>
-                      <button
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                        onClick={() => {
-                          setMobileMenu(null);
-                          updatePaymentMethod(o.id, 'cheque');
-                        }}
-                      >
-                        Cheque
-                      </button>
-                    </div>
-                  );
-                })()}
-              </div>
-            </>
-          )}
         </>
       )}
     </Layout>

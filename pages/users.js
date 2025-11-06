@@ -4,6 +4,7 @@ import Layout from '../components/Layout';
 import { useRouter } from 'next/router';
 import axiosClient from '../config/axios';
 import { Search, UserPlus, MoreVertical, Trash2, Pencil } from 'lucide-react';
+import { getCurrentUser, can, isAdmin } from '../helpers/permissions';
 
 function timeAgoLabel(iso) {
   if (!iso) return 'Nunca';
@@ -36,6 +37,12 @@ export default function UsersPage() {
   const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
   const [openMenuId, setOpenMenuId] = useState(null);
+
+  // usuario actual y flags de permisos (crear/editar/eliminar)
+  const me = useMemo(() => getCurrentUser(), []);
+  const canCreateUsers = useMemo(() => isAdmin(me) || can('users.create', null, me), [me]);
+  const canEditUsers   = useMemo(() => isAdmin(me) || can('users.edit',   null, me), [me]);
+  const canDeleteUsers = useMemo(() => isAdmin(me) || can('users.delete', null, me), [me]);
 
   // Cerrar menú ⋯ al hacer click fuera
   useEffect(() => {
@@ -75,6 +82,7 @@ export default function UsersPage() {
   }, [users, search]);
 
   const handleDelete = async (id) => {
+    if (!(isAdmin(me) || canDeleteUsers)) return;
     if (!confirm('¿Eliminar este usuario?')) return;
     try {
       await axiosClient.delete(`users/${id}`);
@@ -112,13 +120,15 @@ export default function UsersPage() {
           Gestión de <span className="text-brand-600">Usuarios</span>
         </h1>
 
-        <button
-          onClick={() => router.push('/newuser')}
-          className="mt-3 sm:mt-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-600 text-white font-medium shadow hover:bg-brand-700 active:scale-95 transition"
-        >
-          <UserPlus size={18} />
-          Nuevo Usuario
-        </button>
+        {canCreateUsers && (
+          <button
+            onClick={() => router.push('/newuser')}
+            className="mt-3 sm:mt-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-600 text-white font-medium shadow hover:bg-brand-700 active:scale-95 transition"
+          >
+            <UserPlus size={18} />
+            Nuevo Usuario
+          </button>
+        )}
       </div>
 
       {/* Buscador */}
@@ -141,19 +151,19 @@ export default function UsersPage() {
         <p className="text-gray-600">Sin usuarios.</p>
       )}
 
-      {/* MOBILE: cards (⋯ arriba; rol abajo; estado visible) */}
+      {/* MOBILE: cards */}
       {!loading && filtered.length > 0 && (
         <div className="sm:hidden space-y-3">
           {filtered.map((u, idx) => {
             const isLast = idx === filtered.length - 1;
             const lastLabel = timeAgoLabel(u.last_seen_at);
+            const hasAnyActions = canEditUsers || canDeleteUsers; // ocultar ⋯ si no hay acciones
             return (
               <div
                 key={u.id}
                 className="relative bg-white rounded-xl shadow p-3 border border-gray-100"
                 onClick={stop}
               >
-                {/* Fila superior: título + menú ⋯ */}
                 <div className="flex items-start justify-between">
                   <div className="pr-10">
                     <h3 className="text-base font-semibold text-coffee">{u.name || '—'}</h3>
@@ -164,58 +174,61 @@ export default function UsersPage() {
                     </p>
                   </div>
 
-                  {/* Botón ⋯ */}
-                  <div className="relative">
-                    <button
-                      type="button"
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 active:scale-95 transition text-gray-600"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setOpenMenuId((v) => (v === u.id ? null : u.id));
-                      }}
-                      aria-label="Más opciones"
-                      title="Más opciones"
-                    >
-                      <MoreVertical size={18} />
-                    </button>
-
-                    {/* Menú flotante */}
-                    {openMenuId === u.id && (
-                      <div
-                        className={
-                          `absolute right-0 w-36 rounded-lg border border-gray-200 bg-white shadow-lg z-50 ` +
-                          (isLast ? 'bottom-9 top-auto origin-bottom-right' : 'top-9 origin-top-right')
-                        }
-                        onClick={stop}
+                  {hasAnyActions && (
+                    <div className="relative">
+                      <button
+                        type="button"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 active:scale-95 transition text-gray-600"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenMenuId((v) => (v === u.id ? null : u.id));
+                        }}
+                        aria-label="Más opciones"
+                        title="Más opciones"
                       >
-                        <button
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                          onClick={() => {
-                            setOpenMenuId(null);
-                            router.push(`/edituser/${encodeURIComponent(u.email)}`);
-                          }}
+                        <MoreVertical size={18} />
+                      </button>
+
+                      {openMenuId === u.id && (
+                        <div
+                          className={
+                            `absolute right-0 w-36 rounded-lg border border-gray-200 bg-white shadow-lg z-50 ` +
+                            (isLast ? 'bottom-9 top-auto origin-bottom-right' : 'top-9 origin-top-right')
+                          }
+                          onClick={stop}
                         >
-                          <div className="flex items-center gap-2">
-                            <Pencil size={14} /> Editar
-                          </div>
-                        </button>
-                        <button
-                          className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
-                          onClick={() => {
-                            setOpenMenuId(null);
-                            handleDelete(u.id);
-                          }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <Trash2 size={14} /> Eliminar
-                          </div>
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                          {canEditUsers && (
+                            <button
+                              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                router.push(`/edituser/${encodeURIComponent(u.id)}`);
+                              }}
+                            >
+                              <div className="flex items-center gap-2">
+                                <Pencil size={14} /> Editar
+                              </div>
+                            </button>
+                          )}
+                          {canDeleteUsers && (
+                            <button
+                              className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                handleDelete(u.id);
+                              }}
+                            >
+                              <div className="flex items-center gap-2">
+                                <Trash2 size={14} /> Eliminar
+                              </div>
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                {/* Rol abajo */}
                 <div className="mt-3">
                   <RoleBadge role={u.role} />
                 </div>
@@ -225,25 +238,17 @@ export default function UsersPage() {
         </div>
       )}
 
-      {/* DESKTOP: tabla (Estado en vez de “Perfil”) */}
+      {/* DESKTOP: tabla */}
       {!loading && filtered.length > 0 && (
         <div className="hidden sm:block">
           <div className="relative rounded-xl border border-gray-200 shadow-sm overflow-visible">
             <table className="min-w-full">
               <thead className="bg-gray-50 sticky top-0 z-10">
                 <tr className="text-left">
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
-                    Nombre
-                  </th>
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
-                    Email
-                  </th>
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
-                    Estado
-                  </th>
-                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
-                    Rol
-                  </th>
+                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Nombre</th>
+                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Email</th>
+                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Estado</th>
+                  <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Rol</th>
                   <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-center">
                     Acciones
                   </th>
@@ -253,6 +258,7 @@ export default function UsersPage() {
                 {filtered.map((u, idx) => {
                   const isLast = idx === filtered.length - 1;
                   const lastLabel = timeAgoLabel(u.last_seen_at);
+                  const hasAnyActions = canEditUsers || canDeleteUsers;
                   return (
                     <tr
                       key={u.id}
@@ -271,41 +277,49 @@ export default function UsersPage() {
                       </td>
                       <td className="px-6 py-3 text-sm">
                         <div className="relative flex items-center justify-center" onClick={stop}>
-                          <button
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 text-gray-600"
-                            onClick={() => setOpenMenuId((v) => (v === u.id ? null : u.id))}
-                            aria-label="Más opciones"
-                            title="Más opciones"
-                          >
-                            <MoreVertical size={16} />
-                          </button>
+                          {hasAnyActions ? (
+                            <>
+                              <button
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 text-gray-600"
+                                onClick={() => setOpenMenuId((v) => (v === u.id ? null : u.id))}
+                                aria-label="Más opciones"
+                                title="Más opciones"
+                              >
+                                <MoreVertical size={16} />
+                              </button>
 
-                          {openMenuId === u.id && (
-                            <div
-                              className={
-                                `absolute right-0 w-40 rounded-lg border border-gray-200 bg-white shadow-lg z-50 ` +
-                                (isLast ? 'bottom-9 top-auto origin-bottom-right' : 'top-9 origin-top-right')
-                              }
-                            >
-                              <button
-                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                                onClick={() =>
-                                  router.push(`/edituser/${encodeURIComponent(u.email)}`)
-                                }
-                              >
-                                <div className="flex items-center gap-2">
-                                  <Pencil size={14} /> Editar
+                              {openMenuId === u.id && (
+                                <div
+                                  className={
+                                    `absolute right-0 w-40 rounded-lg border border-gray-200 bg-white shadow-lg z-50 ` +
+                                    (isLast ? 'bottom-9 top-auto origin-bottom-right' : 'top-9 origin-top-right')
+                                  }
+                                >
+                                  {canEditUsers && (
+                                    <button
+                                      className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                                      onClick={() => router.push(`/edituser/${encodeURIComponent(u.id)}`)}
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <Pencil size={14} /> Editar
+                                      </div>
+                                    </button>
+                                  )}
+                                  {canDeleteUsers && (
+                                    <button
+                                      className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
+                                      onClick={() => handleDelete(u.id)}
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <Trash2 size={14} /> Eliminar
+                                      </div>
+                                    </button>
+                                  )}
                                 </div>
-                              </button>
-                              <button
-                                className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
-                                onClick={() => handleDelete(u.id)}
-                              >
-                                <div className="flex items-center gap-2">
-                                  <Trash2 size={14} /> Eliminar
-                                </div>
-                              </button>
-                            </div>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-xs text-gray-400">—</span>
                           )}
                         </div>
                       </td>

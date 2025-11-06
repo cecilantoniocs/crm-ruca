@@ -36,12 +36,13 @@ export const PERMISSIONS_SCHEMA = {
     label: 'Ventas / Cobranza',
     actions: {
       view: 'Ver',
-      togglePaid: 'Marcar pagado',
-      toggleInvoice: 'Marcar facturado',
+      markPaid: 'Marcar pagado',
+      updateInvoice: 'Marcar facturado',
+      updatePayment: 'Cambiar método de pago',
+      kpis: 'Ver KPIs',
     },
   },
   clientAccount: {
-    // 👈 NUEVO módulo para la pantalla /client/[id]/account
     label: 'Cuenta del Cliente',
     actions: {
       read: 'Ver cuenta',
@@ -104,60 +105,115 @@ function allFalse() {
 // ==============================
 // 2) Plantillas por rol
 // ==============================
-
 export const ROLE_TEMPLATES = {
-  admin: allTrue(), // 👈 admin tiene TODO en true, incluyendo clientAccount.read/charge
+  admin: allTrue(), // Admin todo true
 
   repartidor: mergeFalse(allFalse(), {
     clients: { view: true, create: true, edit: true },
     orders: { view: true, create: true, edit: true, markDelivered: true },
     products: { view: true },
-    sales: { view: true },
-    clientAccount: { read: true }, // puede mirar saldo del cliente
-    // nada en users
+    sales: { view: true, markPaid: true },
+    clientAccount: { read: true, charge: true },
   }),
 
   vendedor: mergeFalse(allFalse(), {
     clients: { view: true, create: true, edit: true },
     orders: { view: true, create: true, edit: true },
     products: { view: true },
-    sales: { view: true, togglePaid: true },
-    clientAccount: { read: true, charge: true }, // vendedor suele cobrar
+    sales: {
+      view: true,
+      markPaid: true,
+      updateInvoice: false,
+      updatePayment: false,
+      // kpis: true, // (opcional) si ciertos vendedores deben ver KPIs
+    },
+    clientAccount: { read: true, charge: true },
   }),
 
   supervisor: mergeFalse(allFalse(), {
     clients: { view: true, edit: true },
     orders: { view: true, edit: true, markDelivered: true },
     products: { view: true, edit: true },
-    sales: { view: true, togglePaid: true, toggleInvoice: true },
-    users: { view: true },
+    sales: {
+      view: true,
+      markPaid: true,
+      updateInvoice: true,
+      updatePayment: true,
+      kpis: true, // supervisor puede ver KPIs
+    },
+    users: { view: true }, // solo ver
     clientAccount: { read: true, charge: true },
   }),
 
-  // 'produccion' si existe en tu backend, dale lo que quieras o déjalo vacío
   produccion: mergeFalse(allFalse(), {
     products: { view: true, edit: true },
     clients: { view: true },
-    clientAccount: { read: true }, // puede ver cuánto deben pero no cobrar
+    clientAccount: { read: true },
   }),
 };
 
 export function templateForRole(role) {
   const r = String(role || '').toLowerCase();
   const tpl = ROLE_TEMPLATES[r] || emptyPermissions();
-  // devolver copia para no mutar global
   return JSON.parse(JSON.stringify(tpl));
 }
 
 // ==============================
-// 3) Normalización de permisos/usuario
+// 3) Normalización tokens <-> objeto y usuario
 // ==============================
+
+// Convierte lista de tokens ("module:action") a objeto booleans por módulo/acción
+export function tokensToPermsObject(list = []) {
+  const out = emptyPermissions();
+  const has = (k) => list.some((p) => String(p).toLowerCase() === String(k).toLowerCase());
+
+  // clients
+  out.clients.view   = has('clients:read');
+  out.clients.create = has('clients:create');
+  out.clients.edit   = has('clients:update');
+  out.clients.delete = has('clients:delete');
+
+  // orders
+  out.orders.view          = has('orders:read') || has('orders:update') || has('orders:create') || has('orders:delete');
+  out.orders.create        = has('orders:create');
+  out.orders.edit          = has('orders:update');
+  out.orders.delete        = has('orders:delete');
+  out.orders.markDelivered = has('orders:update');
+
+  // products
+  out.products.view   = has('products:read') || has('products:update') || has('products:create') || has('products:delete');
+  out.products.create = has('products:create');
+  out.products.edit   = has('products:update');
+  out.products.delete = has('products:delete');
+
+  // sales (granular) + legacy fallback 'sales:update'
+  out.sales.view          = has('sales:read') || has('sales:update');
+  out.sales.markPaid      = has('sales.mark_paid') || has('sales:update');
+  out.sales.updateInvoice = has('sales.update_invoice') || has('sales:update');
+  out.sales.updatePayment = has('sales.update_payment') || has('sales:update');
+  out.sales.kpis          = has('sales.kpis.view') || has('sales:update');
+
+  // clientAccount
+  out.clientAccount.read   = has('client.account.read');
+  out.clientAccount.charge = has('client.account.charge');
+
+  // users
+  out.users.view   = has('users:read') || has('users:update') || has('users:create') || has('users:delete');
+  out.users.create = has('users:create');
+  out.users.edit   = has('users:update');
+  out.users.delete = has('users:delete');
+
+  return out;
+}
+
 export function normalizePermissions(perms, role) {
-  // "perms" que venga del backend (obj), o usamos plantilla para el rol
-  const base = perms && typeof perms === 'object' ? perms : {};
+  const base =
+    Array.isArray(perms) ? tokensToPermsObject(perms)
+    : perms && typeof perms === 'object' ? perms
+    : {};
+
   const withRole = mergeDeep(templateForRole(role), base);
 
-  // Garantizar todas las llaves del esquema
   const out = {};
   for (const mod of Object.keys(PERMISSIONS_SCHEMA)) {
     out[mod] = {};
@@ -174,13 +230,18 @@ export function normalizeUser(user) {
   if (!user || typeof user !== 'object') return null;
   const role = user.role || (user.isAdmin ? 'admin' : user.role) || '';
   const isAdm = user.isAdmin || String(role).toLowerCase() === 'admin';
+  // Si viene array de tokens desde backend, convertir antes de normalizar
+  const permsInput = Array.isArray(user.permissions)
+    ? tokensToPermsObject(user.permissions)
+    : user.permissions;
+
   return {
     id: user.id ?? null,
     name: user.name ?? '',
     email: user.email ?? '',
     role,
     isAdmin: Boolean(isAdm),
-    permissions: normalizePermissions(user.permissions, role),
+    permissions: normalizePermissions(permsInput, role),
     partnerTag: user.partnerTag ?? user.partner_tag ?? null,
     sellerId: user.sellerId ?? user.id ?? null,
   };
@@ -207,9 +268,7 @@ export function setCurrentUser(userObj) {
   try {
     const normalized = normalizeUser(userObj);
     localStorage.setItem(LS_KEY, JSON.stringify(normalized));
-  } catch {
-    // noop
-  }
+  } catch {}
 }
 
 export function ensureStoredUserNormalized() {
@@ -221,25 +280,27 @@ export function ensureStoredUserNormalized() {
 }
 
 // ==============================
-// 5) helpers can / canAny
+// 5) helpers can / canAny / isAdmin
 // ==============================
-
 export function isAdmin(user = getCurrentUser()) {
   return Boolean(user?.isAdmin);
 }
 
 /**
- * can('orders.edit')  o  can('orders','edit')
+ * can('orders.edit')  o  can('orders','edit')  o  can('sales.kpis.view')
  */
 export function can(moduleOrDot, actionOpt, user = getCurrentUser()) {
   if (!user) return false;
-  if (user.isAdmin) return true; // admin siempre true
+  if (user.isAdmin) return true;
 
   let mod = moduleOrDot;
   let act = actionOpt;
 
   if (actionOpt == null && typeof moduleOrDot === 'string' && moduleOrDot.includes('.')) {
-    const [m, a] = moduleOrDot.split('.');
+    // Soporta acciones con varios puntos ('kpis.view', 'account.read', etc.)
+    const firstDot = moduleOrDot.indexOf('.');
+    const m = moduleOrDot.slice(0, firstDot);
+    const a = moduleOrDot.slice(firstDot + 1);
     mod = m;
     act = a;
   }
@@ -249,16 +310,17 @@ export function can(moduleOrDot, actionOpt, user = getCurrentUser()) {
   if (!mod || !act) return false;
 
   const perms = user.permissions || {};
+  // Compatibilidad: si no existe 'kpis.view' intenta 'kpis'
+  if (act.includes('.') && !(perms?.[mod]?.[act])) {
+    const head = act.split('.')[0];
+    return Boolean(perms?.[mod]?.[head]);
+  }
   return Boolean(perms?.[mod]?.[act]);
 }
 
-/**
- * canAny(['orders.edit','orders.delete'])  o  canAny([['orders','edit'], ...])
- */
 export function canAny(permsList = [], user = getCurrentUser()) {
   if (!user) return false;
   if (user.isAdmin) return true;
-
   for (const entry of permsList) {
     if (Array.isArray(entry)) {
       const [m, a] = entry;

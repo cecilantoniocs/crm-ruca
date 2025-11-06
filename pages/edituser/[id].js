@@ -11,9 +11,11 @@ import {
   PERMISSIONS_SCHEMA,
   templateForRole,
   emptyPermissions,
+  getCurrentUser,
+  isAdmin as isAdminHelper,
+  can as canHelper,
 } from '../../helpers/permissions';
 
-// Opciones de rol visibles en el form
 const ROLE_OPTIONS = [
   { value: 'admin',       label: 'Admin' },
   { value: 'vendedor',    label: 'Vendedor' },
@@ -25,25 +27,18 @@ const ROLE_OPTIONS = [
 // ---------------------------------------------
 // helpers de mapeo permisos <-> array backend
 // ---------------------------------------------
+function normalizeToken(token) {
+  return String(token || '').toLowerCase().replace(/\./g, ':');
+}
 
-/**
- * Convierte la lista ["clients:read","orders:update", ...]
- * que trae el backend a la estructura booleana que usamos en el form:
- * {
- *   clients: { view:true, create:false, ... },
- *   clientAccount: { read:true, charge:false },
- *   ...
- * }
- */
 function listToPermsObject(list = []) {
   const out = emptyPermissions();
-
   const has = (k) => {
-    const norm = String(k || '').toLowerCase().replace(/\./g, ':');
-    return list.some((p) =>
-      String(p || '').toLowerCase().replace(/\./g, ':') === norm
-    );
+    const norm = normalizeToken(k);
+    return list.some((p) => normalizeToken(p) === norm);
   };
+
+  const legacySalesUpdate = has('sales:update');
 
   // clients
   out.clients.view   = has('clients:read');
@@ -52,31 +47,32 @@ function listToPermsObject(list = []) {
   out.clients.delete = has('clients:delete');
 
   // orders
-  out.orders.view          = has('orders:read');
+  out.orders.view          = has('orders:read') || has('orders:update') || has('orders:create') || has('orders:delete');
   out.orders.create        = has('orders:create');
   out.orders.edit          = has('orders:update');
   out.orders.delete        = has('orders:delete');
-  out.orders.markDelivered = has('orders:update'); // mismo permiso que edit/update
+  out.orders.markDelivered = has('orders:update');
 
   // products
-  out.products.view   = has('products:read');
+  out.products.view   = has('products:read') || has('products:update') || has('products:create') || has('products:delete');
   out.products.create = has('products:create');
   out.products.edit   = has('products:update');
   out.products.delete = has('products:delete');
 
-  // sales
-  // tu backend parece agrupar "togglePaid" / "toggleInvoice" bajo sales:update
-  const salesCanUpdate = has('sales:update');
-  out.sales.view          = has('sales:read') || salesCanUpdate;
-  out.sales.togglePaid    = salesCanUpdate;
-  out.sales.toggleInvoice = salesCanUpdate;
+  // sales (granular)
+  out.sales.view           = has('sales:read') || legacySalesUpdate;
+  out.sales.markPaid       = has('sales.mark_paid') || legacySalesUpdate;
+  out.sales.updateInvoice  = has('sales.update_invoice') || legacySalesUpdate;
+  out.sales.updatePayment  = has('sales.update_payment') || legacySalesUpdate;
+  // Nuevo: KPIs avanzados
+  out.sales.kpis          = has('sales.kpis.view') || legacySalesUpdate;
 
-  // clientAccount (pantalla /client/[id]/account)
+  // clientAccount
   out.clientAccount.read   = has('client.account.read');
   out.clientAccount.charge = has('client.account.charge');
 
   // users
-  out.users.view   = has('users:read');
+  out.users.view   = has('users:read') || has('users:update') || has('users:create') || has('users:delete');
   out.users.create = has('users:create');
   out.users.edit   = has('users:update');
   out.users.delete = has('users:delete');
@@ -84,13 +80,6 @@ function listToPermsObject(list = []) {
   return out;
 }
 
-/**
- * Hace lo contrario: del objeto booleans del form a la lista "flat"
- * que vamos a mandar a patch.perms.
- *
- * Ej: { clients:{view:true,edit:false,...}, clientAccount:{read:true,...} }
- *  -> ['clients:read','client.account.read', ...]
- */
 function permsObjectToList(permsObj = {}) {
   const result = [];
 
@@ -105,7 +94,7 @@ function permsObjectToList(permsObj = {}) {
   if (permsObj.orders?.create)        result.push('orders:create');
   if (permsObj.orders?.edit)          result.push('orders:update');
   if (permsObj.orders?.delete)        result.push('orders:delete');
-  if (permsObj.orders?.markDelivered) result.push('orders:update'); // mismo permiso
+  if (permsObj.orders?.markDelivered) result.push('orders:update');
 
   // products
   if (permsObj.products?.view)   result.push('products:read');
@@ -113,26 +102,17 @@ function permsObjectToList(permsObj = {}) {
   if (permsObj.products?.edit)   result.push('products:update');
   if (permsObj.products?.delete) result.push('products:delete');
 
-  // sales
-  // si puede marcar pagado/factura => sales:update
-  const salesNeedsUpdate =
-    permsObj.sales?.togglePaid ||
-    permsObj.sales?.toggleInvoice;
-  if (permsObj.sales?.view || salesNeedsUpdate) {
-    // 'sales:read' para ver listado/cobranzas
-    result.push('sales:read');
-  }
-  if (salesNeedsUpdate) {
-    result.push('sales:update');
-  }
+  // sales (granular)
+  if (permsObj.sales?.view)           result.push('sales:read');
+  if (permsObj.sales?.markPaid)       result.push('sales.mark_paid');
+  if (permsObj.sales?.updateInvoice)  result.push('sales.update_invoice');
+  if (permsObj.sales?.updatePayment)  result.push('sales.update_payment');
+  // Nuevo: KPIs
+  if (permsObj.sales?.kpis)          result.push('sales.kpis.view');
 
   // clientAccount
-  if (permsObj.clientAccount?.read) {
-    result.push('client.account.read');
-  }
-  if (permsObj.clientAccount?.charge) {
-    result.push('client.account.charge');
-  }
+  if (permsObj.clientAccount?.read)   result.push('client.account.read');
+  if (permsObj.clientAccount?.charge) result.push('client.account.charge');
 
   // users
   if (permsObj.users?.view)   result.push('users:read');
@@ -140,7 +120,6 @@ function permsObjectToList(permsObj = {}) {
   if (permsObj.users?.edit)   result.push('users:update');
   if (permsObj.users?.delete) result.push('users:delete');
 
-  // Limpieza: quitar duplicados
   return Array.from(new Set(result));
 }
 
@@ -155,13 +134,22 @@ const EditUser = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
+  // Guard de acceso: solo Admin o quien tenga users.edit
+  useEffect(() => {
+    const me = getCurrentUser();
+    const allowed = isAdminHelper(me) || canHelper('users.edit', null, me);
+    if (!allowed) {
+      router.replace('/users');
+    }
+  }, [router]);
+
   // cargar usuario
   useEffect(() => {
     if (!id) return;
     (async () => {
       try {
         setLoading(true);
-        const res = await axiosClient.get(`users/${id}`); // backend debe aceptar id numérico o uuid
+        const res = await axiosClient.get(`users/${id}`);
         setUser(res.data);
       } catch (e) {
         console.error(e);
@@ -179,19 +167,13 @@ const EditUser = () => {
 
     const roleLower = String(user.role || '').toLowerCase();
 
-    // Si el usuario es admin: parte con la plantilla admin (todo true).
-    // OJO: ahora igual vas a poder tildar / destildar en pantalla.
     if (roleLower === 'admin') {
       return templateForRole('admin'); // all true
     }
 
-    // Para otros roles:
-    // - si backend trae array de permisos => lo usamos
     if (Array.isArray(user.permissions) && user.permissions.length > 0) {
       return listToPermsObject(user.permissions);
     }
-
-    // - si no trae nada => usamos la plantilla por rol
     return templateForRole(roleLower || 'vendedor');
   }, [user]);
 
@@ -224,13 +206,12 @@ const EditUser = () => {
       try {
         setSubmitting(true);
 
-        // 1. Convertir los flags de permisos en la lista flat
+        // Convertir flags a lista flat (granular)
         let permsList = permsObjectToList(values.permissions || emptyPermissions());
 
-        // 2. Si el rol es admin -> forzamos TODOS los permisos igual antes de mandar
-        //    Esto asegura que el admin en BD siempre queda full acceso.
+        // Si el rol es admin, guarda TODO true (robusto)
         if (values.role === 'admin') {
-          const full = templateForRole('admin'); // todo true
+          const full = templateForRole('admin');
           permsList = permsObjectToList(full);
         }
 
@@ -239,7 +220,7 @@ const EditUser = () => {
           email: values.email,
           role: values.role,
           partnerTag: values.partnerTag || '',
-          perms: permsList,
+          perms: permsList,           // guarda granulares
           canDeliver: !!values.canDeliver,
         };
 
@@ -264,22 +245,16 @@ const EditUser = () => {
     },
   });
 
-  // Cambiar rol desde el select
   const handleRoleChange = (e) => {
     const newRole = e.target.value;
     formik.setFieldValue('role', newRole);
-
-    // Resetea permisos base según el rol elegido
     const tpl = templateForRole(newRole);
     formik.setFieldValue('permissions', tpl);
-
-    // Si es repartidor, forzamos canDeliver = true
     if (newRole === 'repartidor') {
       formik.setFieldValue('canDeliver', true);
     }
   };
 
-  // Toggle de cada checkbox de permiso
   const togglePerm = (mod, action) => {
     const next = { ...(formik.values.permissions || {}) };
     next[mod] = { ...(next[mod] || {}) };
@@ -292,10 +267,6 @@ const EditUser = () => {
       <p className="mt-1 text-xs text-rose-600">{formik.errors[id]}</p>
     ) : null;
 
-  // IMPORTANTE:
-  // Ya NO bloqueamos los permisos cuando role === 'admin'.
-  // Antes teníamos algo tipo `const permsDisabled = formik.values.role === 'admin'`
-  // y se aplicaba disabled={permsDisabled}. Eso se fue.
   const permsDisabled = false;
 
   return (
@@ -324,7 +295,6 @@ const EditUser = () => {
           noValidate
         >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Nombre */}
             <div>
               <label className="block text-sm font-medium text-coffee mb-1">Nombre</label>
               <input
@@ -335,7 +305,6 @@ const EditUser = () => {
               {renderError('name')}
             </div>
 
-            {/* Email */}
             <div>
               <label className="block text-sm font-medium text-coffee mb-1">Email</label>
               <input
@@ -346,7 +315,6 @@ const EditUser = () => {
               {renderError('email')}
             </div>
 
-            {/* Rol */}
             <div>
               <label className="block text-sm font-medium text-coffee mb-1">Rol</label>
               <select
@@ -363,7 +331,6 @@ const EditUser = () => {
               {renderError('role')}
             </div>
 
-            {/* Etiqueta de socio */}
             <div>
               <label className="block text-sm font-medium text-coffee mb-1">
                 Etiqueta de socio (opcional)
@@ -377,7 +344,6 @@ const EditUser = () => {
               {renderError('partnerTag')}
             </div>
 
-            {/* Nueva contraseña */}
             <div>
               <label className="block text-sm font-medium text-coffee mb-1">Nueva contraseña</label>
               <input
@@ -389,7 +355,6 @@ const EditUser = () => {
               {renderError('newPassword')}
             </div>
 
-            {/* Confirmar */}
             <div>
               <label className="block text-sm font-medium text-coffee mb-1">
                 Confirmar contraseña
@@ -403,7 +368,6 @@ const EditUser = () => {
               {renderError('confirmPassword')}
             </div>
 
-            {/* Puede repartir */}
             <div className="md:col-span-2">
               <label className="inline-flex items-center gap-2 text-sm mt-2">
                 <input
@@ -448,6 +412,7 @@ const EditUser = () => {
                             className="accent-indigo-600"
                             checked={checked}
                             onChange={() => togglePerm(mod, key)}
+                            disabled={permsDisabled}
                           />
                           {label}
                         </label>

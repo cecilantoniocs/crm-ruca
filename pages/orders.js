@@ -7,6 +7,7 @@ import {
   Search,
   PackagePlus,
   Calendar,
+  CalendarRange,
   Navigation,
   MoreVertical,
   Trash2,
@@ -77,14 +78,36 @@ const PaymentBadge = ({ value }) => {
   );
 };
 
-// Formatear YYYY-MM-DD sin crear Date (evita desfase -1 día)
-const fmtDateYMD = (iso) => {
-  if (!iso) return '—';
-  const s = String(iso).slice(0, 10);
-  const [yyyy, mm, dd] = s.split('-').map(Number);
+// ---------- Fechas (idéntico a sales) ----------
+const startOfDay = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x; };
+const endOfDay   = (d) => { const x = new Date(d); x.setHours(23,59,59,999); return x; };
+
+// YYYY-MM-DD en hora local (evita desfases)
+const toYMDLocal = (d) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+//  dd/mm/yyyy (desktop)
+const fmtDateDMY = (isoOrYmd) => {
+  if (!isoOrYmd) return '—';
+  const s = String(isoOrYmd).slice(0, 10);
+  const [yyyy, mm, dd] = s.split('-');
+  if (!yyyy || !mm || !dd) return '—';
+  return `${dd}/${mm}/${yyyy}`;
+};
+
+//  "d mes yyyy" (móvil)
+const fmtDateMobile = (isoOrYmd) => {
+  if (!isoOrYmd) return '—';
+  const s = String(isoOrYmd).slice(0, 10);
+  const [yyyy, mm, dd] = s.split('-').map((x) => x && x.padStart(2, '0'));
   if (!yyyy || !mm || !dd) return '—';
   const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-  return `${dd} ${meses[mm - 1]} ${yyyy}`;
+  const mIdx = Math.max(0, Math.min(11, Number(mm) - 1));
+  return `${Number(dd)} ${meses[mIdx]} ${yyyy}`;
 };
 
 // Mostrar número de pedido (#0001)
@@ -107,8 +130,13 @@ export default function Orders() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
-  // filtro por estado
-  const [statusFilter, setStatusFilter] = useState('todos');
+  // filtro por estado (por defecto Pendiente)
+  const [statusFilter, setStatusFilter] = useState('pendiente');
+
+  // ---- filtros de fecha (misma barra/flujo que sales.js) ----
+  const [quickRange, setQuickRange] = useState('today'); // 'today' | 'week' | 'month' | 'range'
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
 
   // Menús desktop
   const [openMenuId, setOpenMenuId] = useState(null);       // ⋯ acciones
@@ -116,7 +144,7 @@ export default function Orders() {
   const [openPaymentId, setOpenPaymentId] = useState(null); // cambiar pago
   const [openCourierId, setOpenCourierId] = useState(null); // cambiar repartidor
 
-  // Swipe mobile (✅ una sola vez)
+  // Swipe mobile
   const touchStart = useRef({});
   const [swipeX, setSwipeX] = useState({});
 
@@ -138,12 +166,11 @@ export default function Orders() {
     return () => window.removeEventListener('click', close);
   }, []);
 
-  // ✅ Refetch resiliente (secuencial, con try/catch por recurso)
+  // ✅ Refetch resiliente
   const refetch = useCallback(async () => {
     setLoading(true);
     setLoadError('');
 
-    // 1) Pedidos
     try {
       const resO = await axiosClient.get('orders');
       const list = resO?.data ?? [];
@@ -157,16 +184,13 @@ export default function Orders() {
       return;
     }
 
-    // 2) Repartidores (si falla, seguimos)
     try {
       const resCour = await axiosClient.get('couriers');
       setCouriers(resCour?.data ?? []);
-    } catch (e) {
-      console.warn('No se pudieron cargar repartidores. Continuando sin ellos:', e);
+    } catch {
       setCouriers([]);
     }
 
-    // 3) Clientes (si falla, seguimos)
     try {
       const seller = getCurrentSeller?.();
       if (seller?.id) {
@@ -175,26 +199,47 @@ export default function Orders() {
       } else {
         setClients([]);
       }
-    } catch (e) {
-      console.warn('Error cargando clientes. Continuando sin ellos:', e);
+    } catch {
       setClients([]);
     }
 
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    refetch();
-  }, [refetch]);
+  // inicializar + refrescar
+  useEffect(() => { refetch(); }, [refetch]);
 
-  // mapa de cliente por id
+  // Rango auto (igual que sales.js)
+  useEffect(() => {
+    if (quickRange === 'range') return;
+    const now = new Date();
+    let start;
+    let end = endOfDay(now);
+
+    if (quickRange === 'today') {
+      start = startOfDay(now);
+    } else if (quickRange === 'week') {
+      const d = new Date(now);
+      const day = (d.getDay() + 6) % 7; // lunes
+      const monday = new Date(d);
+      monday.setDate(d.getDate() - day);
+      start = startOfDay(monday);
+    } else {
+      const first = new Date(now.getFullYear(), now.getMonth(), 1);
+      start = startOfDay(first);
+    }
+
+    setFromDate(toYMDLocal(start));
+    setToDate(toYMDLocal(end));
+  }, [quickRange]);
+
+  // mapas
   const clientMap = useMemo(() => {
     const m = new Map();
     for (const c of clients) m.set(c.id, c);
     return m;
   }, [clients]);
 
-  // mapa de courier id -> nombre
   const courierName = useMemo(() => {
     const m = new Map();
     for (const u of couriers) m.set(u.id, u.name || u.email || 'Usuario');
@@ -203,13 +248,20 @@ export default function Orders() {
 
   const CLP = useMemo(() => new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }), []);
 
-  const mapsUrl = (addr) =>
-    `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr || '')}`;
+  const mapsUrl = (addr) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr || '')}`;
 
-  // helper: ¿cadena "larga"? (reutilizamos para local y dirección)
-  const isLongAddress = (s) => (s || '').trim().length > 20;
+  const isLong = (s, n = 20) => (s || '').trim().length > n;
 
+  // filtrado
   const filtered = useMemo(() => {
+    const inDateRange = (o) => {
+      const d = String(o.deliveryDate || '').slice(0, 10);
+      if (!d) return true;
+      if (fromDate && d < fromDate) return false;
+      if (toDate && d > toDate) return false;
+      return true;
+    };
+
     const bySearch = (o) => {
       if (!debounced) return true;
       const client = (o.clientName || '').toLowerCase();
@@ -218,7 +270,7 @@ export default function Orders() {
       const address = (clientMap.get(o.clientId)?.dir1 || '').toLowerCase();
       const pay = paymentToString(o.paymentMethod);
       const courier = courierName(o.deliveredBy).toLowerCase();
-      const code = getOrderCode(o).toLowerCase(); // permite buscar por #0001
+      const code = getOrderCode(o).toLowerCase();
       return (
         client.includes(debounced) ||
         local.includes(debounced) ||
@@ -235,8 +287,8 @@ export default function Orders() {
       return statusToString(o.status) === statusFilter;
     };
 
-    return orders.filter((o) => bySearch(o) && byStatus(o));
-  }, [orders, debounced, clientMap, statusFilter, courierName]);
+    return orders.filter((o) => inDateRange(o) && bySearch(o) && byStatus(o));
+  }, [orders, debounced, clientMap, statusFilter, courierName, fromDate, toDate]);
 
   const stop = (e) => e.stopPropagation();
 
@@ -256,8 +308,7 @@ export default function Orders() {
     }
   };
 
-  const handleEdit = (id) =>
-    router.push({ pathname: '/editorder/[id]', query: { id } });
+  const handleEdit = (id) => router.push({ pathname: '/editorder/[id]', query: { id } });
 
   const updateStatus = async (id, newStatus) => {
     const prev = orders.find((o) => o.id === id);
@@ -297,7 +348,7 @@ export default function Orders() {
     }
   };
 
-  // swipe handlers (mobile)
+  // swipe (umbral más largo)
   const onTouchStart = (id) => (e) => {
     const t = e.changedTouches?.[0];
     if (!t) return;
@@ -312,7 +363,7 @@ export default function Orders() {
     const dy = t.clientY - start.y;
     if (Math.abs(dx) > Math.abs(dy)) e.preventDefault?.();
     if (Math.abs(dy) > 40) return;
-    const clamped = Math.max(-120, Math.min(120, dx));
+    const clamped = Math.max(-200, Math.min(200, dx));
     setSwipeX((s) => ({ ...s, [id]: clamped }));
   };
   const onTouchEnd = (id) => (e) => {
@@ -321,7 +372,7 @@ export default function Orders() {
     if (!start || !t) return;
     const dx = t.clientX - start.x;
     const dy = t.clientY - start.y;
-    const THRESH = 64;
+    const THRESH = 160;
     if (Math.abs(dx) > THRESH && Math.abs(dy) < 40) {
       if (dx < 0) updateStatus(id, 'entregado');
       else updateStatus(id, 'pendiente');
@@ -330,17 +381,13 @@ export default function Orders() {
     delete touchStart.current[id];
   };
 
-  const pillClass = (val) =>
+  const pillClass = (active) =>
     `px-3 py-1.5 text-xs sm:text-sm rounded-md font-medium transition ${
-      statusFilter === val
-        ? 'bg-white text-brand-600 shadow'
-        : 'text-gray-600 hover:text-coffee'
+      active ? 'bg-white text-brand-600 shadow' : 'text-gray-600 hover:text-coffee'
     }`;
 
-  // ⬇️ Hook para Pull-to-Refresh en ventana
   const { headerProps } = usePullToRefreshWindow({ onRefresh: refetch, threshold: 60 });
 
-  // Ir a cuenta del cliente
   const goClientAccount = (clientId) => {
     if (!clientId) return;
     router.push(`/client/${clientId}/account`);
@@ -348,7 +395,6 @@ export default function Orders() {
 
   return (
     <Layout>
-      {/* Header PTR pegado arriba del contenido. */}
       <PullToRefreshHeader {...headerProps} />
 
       {/* Header */}
@@ -366,24 +412,106 @@ export default function Orders() {
         </button>
       </div>
 
-      {/* Buscador + Filtro estado */}
-      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:gap-4">
-        <div className="relative flex-1 max-w-full">
-          <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
-          <input
-            type="text"
-            placeholder="Buscar por #, cliente, local, dirección, estado, pago o repartidor…"
-            className="pl-10 pr-4 py-2 w-full rounded-lg border border-gray-300 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
+      {/* Filtros */}
+      <div className="mb-4">
+        {/* Fila 1: Buscador (más ancho en desktop) */}
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:items-end">
+          <div className="col-span-2 sm:mr-3">
+            <div className="relative w-full sm:w-[480px] sm:flex-none">
+              <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
+              <input
+                type="text"
+                placeholder="Buscar por #, cliente, local, dirección, estado, pago o repartidor…"
+                className="pl-10 pr-4 py-2 w-full rounded-lg border border-gray-300 shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600 text-sm"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+          </div>
         </div>
 
-        <div className="mt-3 sm:mt-0">
-          <div className="inline-flex rounded-lg bg-gray-100 p-1 shadow-inner">
-            <button type="button" className={pillClass('todos')} onClick={() => setStatusFilter('todos')}>Todos</button>
-            <button type="button" className={pillClass('pendiente')} onClick={() => setStatusFilter('pendiente')}>Pendiente</button>
-            <button type="button" className={pillClass('entregado')} onClick={() => setStatusFilter('entregado')}>Entregado</button>
+        {/* Fila 2: Estado + Rápidos + Fechas (misma línea en desktop) */}
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-end">
+          {/* Estado: full en móvil, compacto en desktop */}
+          <div className="col-span-2 sm:mr-3 w-full sm:w-auto">
+            <div className="rounded-lg bg-gray-100 p-1 shadow-inner w-full sm:w-auto">
+              <div className="grid grid-cols-3 gap-1 w-full sm:w-auto sm:flex">
+                <button
+                  type="button"
+                  className={`${pillClass(statusFilter === 'todos')} flex-1 sm:flex-none`}
+                  onClick={() => setStatusFilter('todos')}
+                >
+                  Todos
+                </button>
+                <button
+                  type="button"
+                  className={`${pillClass(statusFilter === 'pendiente')} flex-1 sm:flex-none`}
+                  onClick={() => setStatusFilter('pendiente')}
+                >
+                  Pendiente
+                </button>
+                <button
+                  type="button"
+                  className={`${pillClass(statusFilter === 'entregado')} flex-1 sm:flex-none`}
+                  onClick={() => setStatusFilter('entregado')}
+                >
+                  Entregado
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Rápidos (Hoy / Semana / Mes / Rango con ícono) */}
+          <div className="col-span-2 sm:mr-3">
+            <div className="inline-flex w-full sm:w-auto rounded-lg border border-gray-300 overflow-hidden">
+              <button
+                type="button"
+                className={`px-3 py-2 text-sm flex-1 sm:flex-none text-center ${quickRange === 'today' ? 'bg-gray-900 text-white' : 'bg-white hover:bg-gray-50'}`}
+                onClick={() => setQuickRange('today')}
+              >
+                Hoy
+              </button>
+              <button
+                type="button"
+                className={`px-3 py-2 text-sm flex-1 sm:flex-none text-center ${quickRange === 'week' ? 'bg-gray-900 text-white' : 'bg-white hover:bg-gray-50'}`}
+                onClick={() => setQuickRange('week')}
+              >
+                Semana
+              </button>
+              <button
+                type="button"
+                className={`px-3 py-2 text-sm flex-1 sm:flex-none text-center ${quickRange === 'month' ? 'bg-gray-900 text-white' : 'bg-white hover:bg-gray-50'}`}
+                onClick={() => setQuickRange('month')}
+              >
+                Mes
+              </button>
+              <button
+                type="button"
+                className={`px-3 py-2 text-sm flex-1 sm:flex-none flex items-center justify-center ${quickRange === 'range' ? 'bg-gray-900 text-white' : 'bg-white hover:bg-gray-50'}`}
+                onClick={() => setQuickRange('range')}
+                title="Rango"
+              >
+                <CalendarRange size={16} className="-mt-0.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Fechas (misma línea) */}
+          <div className="sm:mr-3">
+            <input
+              type="date"
+              className="border border-gray-300 rounded-lg px-2 py-2 text-sm w-[90%] sm:w-[138px]"
+              value={fromDate || ''}
+              onChange={(e) => { setQuickRange('range'); setFromDate(e.target.value || ''); }}
+            />
+          </div>
+          <div className="sm:mr-3">
+            <input
+              type="date"
+              className="border border-gray-300 rounded-lg px-2 py-2 text-sm w-[90%] sm:w-[138px]"
+              value={toDate || ''}
+              onChange={(e) => { setQuickRange('range'); setToDate(e.target.value || ''); }}
+            />
           </div>
         </div>
       </div>
@@ -406,7 +534,7 @@ export default function Orders() {
             const orderCode = getOrderCode(o);
 
             const bgSwipe =
-              dx < -30 ? 'bg-emerald-50 border-emerald-200' : delivered ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-100';
+              dx < -100 ? 'bg-emerald-50 border-emerald-200' : delivered ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-100';
 
             return (
               <div
@@ -418,7 +546,7 @@ export default function Orders() {
                 onTouchCancel={() => setSwipeX((s) => ({ ...s, [o.id]: 0 }))}
                 style={{ transform: `translate3d(${dx}px, 0, 0)`, transition: 'transform 180ms ease' }}
               >
-                {/* Número de pedido (a la izquierda del lápiz) */}
+                {/* Número de pedido */}
                 <div
                   className="absolute right-12 top-2 inline-flex items-center justify-center h-8 px-2 rounded-md bg-gray-900 text-white text-xs font-mono tracking-wider shadow ring-1 ring-black/10 select-none"
                   title="Número de pedido"
@@ -437,14 +565,15 @@ export default function Orders() {
                   <Pencil size={16} />
                 </button>
 
-                {/* Local (primero) + acceso cuenta, luego Cliente */}
+                {/* Local (negrita) + Cliente (chico) con acceso a cuenta */}
                 <div className="pr-20">
-                  <div className="flex items-center gap-2 text-sm text-gray-700">
-                    <span>{o.clientLocal || '—'}</span>
+                  <h3 className="text-base font-semibold text-coffee">{o.clientLocal || '—'}</h3>
+                  <div className="mt-0.5 flex items-center gap-2 text-sm text-gray-700">
+                    <span className="truncate max-w-[60vw]">{o.clientName || '—'}</span>
                     {o.clientId && (
                       <button
                         type="button"
-                        className="inline-flex items-center justify-center rounded hover:bg-gray-100 text-gray-600 shrink-0 h-6 w-6"
+                        className="inline-flex items-center justify-center rounded hover:bg-gray-100 p-1 text-gray-600"
                         title="Ver cuenta del cliente"
                         aria-label="Ver cuenta del cliente"
                         onClick={() => goClientAccount(o.clientId)}
@@ -453,7 +582,6 @@ export default function Orders() {
                       </button>
                     )}
                   </div>
-                  <h3 className="text-base font-semibold text-coffee">{o.clientName || '—'}</h3>
                 </div>
 
                 {/* Dirección + GPS (móvil) */}
@@ -481,14 +609,14 @@ export default function Orders() {
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <div className="text-sm text-coffee flex items-center gap-2">
                     <Calendar size={16} className="text-gray-400" />
-                    <span>{fmtDateYMD(o.deliveryDate)}</span>
+                    <span>{fmtDateMobile(o.deliveryDate)}</span>
                   </div>
                   <div className="text-right">
                     <StatusBadge value={o.status} />
                   </div>
                 </div>
 
-                {/* Repartidor (selector simple en móvil) */}
+                {/* Repartidor (selector) */}
                 <div className="mt-2">
                   <label className="block text-xs text-gray-600 mb-1">Repartidor</label>
                   <select
@@ -549,9 +677,7 @@ export default function Orders() {
               <table className="min-w-[1240px] w-full">
                 <thead className="bg-gray-50">
                   <tr className="text-left">
-                    {/* NUEVA primera columna: N° */}
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">N°</th>
-                    {/* Local primero, Cliente segundo */}
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Local</th>
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Cliente</th>
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Dirección</th>
@@ -570,8 +696,8 @@ export default function Orders() {
                     const c = clientMap.get(o.clientId);
                     const addr = c?.dir1 || '';
                     const items = o.items ?? [];
-                    const long = isLongAddress(addr);
-                    const localLong = isLongAddress(o.clientLocal);
+                    const longAddr = isLong(addr);
+                    const longLocal = isLong(o.clientLocal);
                     const orderCode = getOrderCode(o);
 
                     return (
@@ -584,31 +710,36 @@ export default function Orders() {
                             </span>
                           </td>
 
-                          {/* Local + acceso a cuenta (con clamp como Dirección) */}
+                          {/* Local en negrita */}
                           <td className="px-6 py-3 text-sm text-coffee">
-                            <div className={`inline-flex ${localLong ? 'items-start' : 'items-center'} gap-2`}>
-                              <span
-                                className="block whitespace-normal break-words leading-tight"
-                                style={
-                                  localLong
-                                    ? {
-                                        width: '20ch',
-                                        display: '-webkit-box',
-                                        WebkitLineClamp: 2,
-                                        WebkitBoxOrient: 'vertical',
-                                        overflow: 'hidden',
-                                      }
-                                    : {}
-                                }
-                                title={o.clientLocal || '—'}
-                              >
-                                {o.clientLocal || '—'}
-                              </span>
+                            <span
+                              className="block font-semibold whitespace-normal break-words leading-tight"
+                              style={
+                                longLocal
+                                  ? {
+                                      width: '20ch',
+                                      display: '-webkit-box',
+                                      WebkitLineClamp: 2,
+                                      WebkitBoxOrient: 'vertical',
+                                      overflow: 'hidden',
+                                    }
+                                  : {}
+                              }
+                              title={o.clientLocal || '—'}
+                            >
+                              {o.clientLocal || '—'}
+                            </span>
+                          </td>
+
+                          {/* Cliente + acceso cuenta al lado */}
+                          <td className="px-6 py-3 text-sm text-coffee">
+                            <div className="inline-flex items-center gap-2">
+                              <span className="leading-tight">{o.clientName || '—'}</span>
                               {o.clientId && (
                                 <button
                                   type="button"
                                   onClick={() => goClientAccount(o.clientId)}
-                                  className={`inline-flex ${localLong ? 'mt-0.5' : ''} h-7 w-7 items-center justify-center rounded-md hover:bg-gray-100 text-gray-600 shrink-0`}
+                                  className="inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-gray-100 text-gray-600 shrink-0"
                                   title="Ver cuenta del cliente"
                                   aria-label="Ver cuenta del cliente"
                                 >
@@ -618,16 +749,13 @@ export default function Orders() {
                             </div>
                           </td>
 
-                          {/* Cliente */}
-                          <td className="px-6 py-3 text-sm text-coffee">{o.clientName || '—'}</td>
-
                           {/* Dirección + GPS */}
                           <td className="px-6 py-3 text-sm text-coffee">
-                            <div className={`inline-flex ${long ? 'items-start' : 'items-center'} gap-3`}>
+                            <div className={`inline-flex ${longAddr ? 'items-start' : 'items-center'} gap-3`}>
                               <span
                                 className="block whitespace-normal break-words leading-tight"
                                 style={
-                                  long
+                                  longAddr
                                     ? {
                                         width: '20ch',
                                         display: '-webkit-box',
@@ -647,7 +775,7 @@ export default function Orders() {
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   onClick={stop}
-                                  className={`inline-flex ${long ? 'mt-0.5' : ''} h-7 w-7 items-center justify-center rounded-full bg-brand-50 text-brand-600 hover:bg-brand-100 border border-brand-200 shrink-0`}
+                                  className={`inline-flex ${longAddr ? 'mt-0.5' : ''} h-7 w-7 items-center justify-center rounded-full bg-brand-50 text-brand-600 hover:bg-brand-100 border border-brand-200 shrink-0`}
                                   title="Abrir en Google Maps"
                                   aria-label="Abrir en Google Maps"
                                 >
@@ -657,7 +785,7 @@ export default function Orders() {
                             </div>
                           </td>
 
-                          <td className="px-6 py-3 text-sm text-coffee">{fmtDateYMD(o.deliveryDate)}</td>
+                          <td className="px-6 py-3 text-sm text-coffee">{fmtDateDMY(o.deliveryDate)}</td>
 
                           {/* Estado editable */}
                           <td className="px-6 py-3 text-sm relative" onClick={stop}>
@@ -795,9 +923,8 @@ export default function Orders() {
                           </td>
                         </tr>
 
-                        {/* Detalle (SOLO ESCRITORIO) → menos espacio entre columnas */}
+                        {/* Detalle productos */}
                         <tr className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
-                          {/* +1 col por la nueva columna N° → colSpan 11 */}
                           <td colSpan={11} className="px-6 pb-4">
                             <div className="mt-1 rounded-lg border border-indigo-200 bg-indigo-50 p-4">
                               <h4 className="text-sm font-semibold text-coffee mb-2">Detalle de productos</h4>

@@ -9,18 +9,18 @@ export default async function handler(req, res) {
   try {
     requirePerm(user, 'sales.read');
 
-    // Parámetros (front usa fromDate / toDate en formato YYYY-MM-DD)
     const {
-      q,                       // búsqueda por cliente/local (opcional)
-      fromDate, toDate,        // rango de fechas (YYYY-MM-DD)
-      owner,                   // 'cecil' | 'rucapellan' (opcional)
-      courierId,               // repartidor (opcional)
-      invoice,                 // 'facturado' | 'no_facturado' | 'sin_factura' (opcional)
-      paid,                    // 'pagado' | 'no_pagado' (opcional)
-      paymentMethod            // 'efectivo' | 'transferencia' | 'cheque' (opcional)
+      q,
+      fromDate, toDate,
+      owner,             // 'cecil' | 'rucapellan'
+      courierId,         // uuid
+      invoice,           // 'facturado' | 'no_facturado' | 'sin_factura'
+      paid,              // 'pagado' | 'no_pagado'
+      paymentMethod      // 'efectivo' | 'transferencia' | 'cheque'
+      // status: ignorado desde el front; este API SIEMPRE entrega entregados
     } = req.query;
 
-    // Base: vista acelerada con ítems y saldo
+    // Vista con pagos + items (ahora incluye status y ya viene filtrada a 'entregado')
     let query = supabaseServer
       .from('sales_with_payments_items')
       .select(`
@@ -38,20 +38,18 @@ export default async function handler(req, res) {
         client_owner,
         paid_sum,
         remaining,
-        items
+        items,
+        status
       `)
+      // Doble seguro (aunque la vista ya filtra)
+      .eq('status', 'entregado')
       .order('delivery_date', { ascending: false })
       .order('id', { ascending: false })
       .limit(2000);
 
-    // Filtro de fecha sobre delivery_date (la fecha que eliges en Orders)
-    // Usamos comparación directa de 'YYYY-MM-DD' para evitar desfaces por UTC.
-    if (fromDate) {
-      query = query.gte('delivery_date', fromDate);
-    }
-    if (toDate) {
-      query = query.lte('delivery_date', toDate);
-    }
+    // Fechas (YYYY-MM-DD)
+    if (fromDate) query = query.gte('delivery_date', fromDate);
+    if (toDate)   query = query.lte('delivery_date', toDate);
 
     // Búsqueda por texto (cliente/local)
     if (q && String(q).trim()) {
@@ -60,14 +58,10 @@ export default async function handler(req, res) {
     }
 
     // Cartera (owner)
-    if (owner && owner !== 'all') {
-      query = query.eq('client_owner', owner);
-    }
+    if (owner && owner !== 'all') query = query.eq('client_owner', owner);
 
     // Repartidor
-    if (courierId && courierId !== 'all') {
-      query = query.eq('delivered_by', courierId);
-    }
+    if (courierId && courierId !== 'all') query = query.eq('delivered_by', courierId);
 
     // Estado de factura
     if (invoice && invoice !== 'all') {
@@ -81,35 +75,31 @@ export default async function handler(req, res) {
     }
 
     // Estado de pago
-    if (paid && paid !== 'all') {
-      query = query.eq('paid', paid === 'pagado');
-    }
+    if (paid && paid !== 'all') query = query.eq('paid', paid === 'pagado');
 
     // Método de pago
-    if (paymentMethod && paymentMethod !== 'all') {
-      query = query.eq('payment_method', paymentMethod);
-    }
+    if (paymentMethod && paymentMethod !== 'all') query = query.eq('payment_method', paymentMethod);
 
     const { data, error } = await query;
     if (error) throw error;
 
-    // Mapear a camelCase para el front
     const rows = (data || []).map((o) => ({
-      id: o.id,
-      total: o.total,
-      paid: o.paid,
-      deliveryDate: o.delivery_date,
-      clientId: o.client_id,
-      clientName: o.client_name,
-      clientLocal: o.client_local,
-      deliveredBy: o.delivered_by,
+      id:            o.id,
+      total:         o.total,
+      paid:          o.paid,
+      deliveryDate:  o.delivery_date,
+      clientId:      o.client_id,
+      clientName:    o.client_name,
+      clientLocal:   o.client_local,
+      deliveredBy:   o.delivered_by,
       paymentMethod: o.payment_method,
-      invoice: o.invoice,
-      invoiceSent: o.invoice_sent,
-      clientOwner: o.client_owner,
-      paidSum: o.paid_sum,
-      remaining: o.remaining,
-      items: Array.isArray(o.items) ? o.items : [], // [{name, qty, price, subtotal}]
+      invoice:       o.invoice,
+      invoiceSent:   o.invoice_sent,
+      clientOwner:   o.client_owner,
+      paidSum:       Number(o.paid_sum ?? 0),
+      remaining:     Number(o.remaining ?? 0),
+      items:         Array.isArray(o.items) ? o.items : [],
+      status:        o.status, // queda disponible si lo quieres mostrar
     }));
 
     res.json(rows);
