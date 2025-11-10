@@ -96,6 +96,19 @@ export default function App({ Component, pageProps }) {
     };
   }, []);
 
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker
+          .register('/sw.js')
+          .catch((err) => {
+            console.error('Error registrando SW:', err);
+          });
+      });
+    }
+  }, []);
+
+  
   return (
     <AuthGuard>
       <Component {...pageProps} />
