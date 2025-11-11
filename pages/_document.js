@@ -7,13 +7,29 @@ export default function Document() {
       <Head>
         {/* Favicons */}
         <link rel="icon" href="/favicon.ico" />
-        <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
-        <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+        <link
+          rel="icon"
+          type="image/png"
+          sizes="32x32"
+          href="/favicon-32x32.png"
+        />
+        <link
+          rel="icon"
+          type="image/png"
+          sizes="16x16"
+          href="/favicon-16x16.png"
+        />
 
-        {/* iOS (PNG con fondo sólido, sin transparencia) */}
-        <link rel="apple-touch-icon" href="/icons/ios-180.png" />
+        {/* iOS: icono y PWA full-screen */}
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta
+          name="apple-mobile-web-app-status-bar-style"
+          content="black-translucent"
+        />
+        <meta name="apple-mobile-web-app-title" content="CRM Ruca" />
 
-        {/* PWA Manifest (iconos maskable) */}
+        {/* PWA Manifest */}
         <link rel="manifest" href="/site.webmanifest" />
 
         {/* Tema del navegador */}
