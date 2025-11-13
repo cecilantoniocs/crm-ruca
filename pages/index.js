@@ -6,10 +6,10 @@ const Dashboard = () => {
     <Layout>
       <div className="p-6">
         <h1 className="text-2xl font-light text-coffee">
-          Bienvenido al CRM
+          Bienvenido a RookApp
         </h1>
         <p className="text-gray-600 mt-2">
-          Próximamente: panel con métricas y accesos rápidos.
+          Llevando Rucapellan al siguiente nivel 🚀
         </p>
       </div>
     </Layout>
