@@ -15,7 +15,6 @@ function coerceArray(val) {
 }
 
 async function decodeFromCookieOrHeader(req) {
-  // 1) intenta las cookies más comunes
   const cookieHeader = req.headers.cookie || '';
   const cookies = Object.fromEntries(
     cookieHeader.split(';').map((p) => {
@@ -26,6 +25,7 @@ async function decodeFromCookieOrHeader(req) {
       return [k, v];
     })
   );
+
   const token =
     cookies['auth_token'] ||
     cookies['token'] ||
@@ -38,63 +38,61 @@ async function decodeFromCookieOrHeader(req) {
   if (!secret) throw new Error('JWT_SECRET missing');
 
   const enc = new TextEncoder().encode(secret);
-  const { payload } = await jwtVerify(token, enc); // HS256 (compat con jsonwebtoken)
+  const { payload } = await jwtVerify(token, enc); // HS256
   return payload || null;
 }
 
 export default async function handler(req, res) {
   try {
-    // 1) Primero intenta por tu guard habitual
+    // 1) Sesión base (guard o JWT)
     let u = getReqUser(req);
-
-    // 2) Si no hay usuario o viene “flaco”, decodifica el JWT directo
     if (!u?.id) {
       const decoded = await decodeFromCookieOrHeader(req);
-      if (decoded?.id) {
-        u = decoded;
-      }
+      if (decoded?.id) u = decoded;
     }
+    if (!u?.id) return res.status(401).json({ error: 'UNAUTHENTICATED' });
 
-    if (!u?.id) {
-      return res.status(401).json({ error: 'UNAUTHENTICATED' });
-    }
-
-    // 3) Completa desde BD si faltan campos o están vacíos
+    // 2) SIEMPRE refrescamos desde BD los campos críticos (role, is_admin, can_deliver, permissions, partner_tag)
     let row = null;
-    const needFetch =
-      u.email == null ||
-      u.name == null ||
-      u.partner_tag == null ||
-      (typeof u.partner_tag === 'string' && u.partner_tag.trim() === '') ||
-      u.permissions == null ||
-      typeof u.is_admin === 'undefined' ||
-      typeof u.can_deliver === 'undefined';
-
-    if (needFetch) {
+    try {
       const { data, error } = await supabaseServer
         .from('users_app')
-        .select('id,email,name,is_admin,permissions,partner_tag,can_deliver')
+        .select('id,email,name,role,is_admin,permissions,partner_tag,can_deliver')
         .eq('id', u.id)
         .maybeSingle();
-      if (!error) row = data;
+      if (error) throw error;
+      row = data || null;
+    } catch (e) {
+      // si falla, seguimos con lo que tengamos en u
+      row = null;
     }
+
+    // 3) Normalización de tag/permissions
+    const email = row?.email ?? u.email ?? null;
+    const name  = row?.name  ?? u.name  ?? null;
+    const role  = (row?.role ?? u.role ?? '').toString().trim();
+    const isAdmin = !!(row?.is_admin ?? u.is_admin);
+    const canDeliver = !!(row?.can_deliver ?? u.can_deliver);
+    const permissions = coerceArray(row?.permissions ?? u.permissions);
 
     const rawTag = (row?.partner_tag ?? u.partner_tag ?? u.partnerTag ?? '').toString().trim();
     const tagLower = rawTag.toLowerCase();
 
-    const permissions = coerceArray(row?.permissions ?? u.permissions);
-
+    // 4) User consolidado (exponemos ambos nombres de campos por compatibilidad)
     const safeUser = {
       id: u.id,
-      email: row?.email ?? u.email ?? null,
-      name: row?.name ?? u.name ?? null,
-      is_admin: !!(row?.is_admin ?? u.is_admin),
+      email,
+      name,
+      role,                       // <- IMPORTANTE: ahora siempre presente
+      is_admin: isAdmin,
+      isAdmin,                    // alias
+      can_deliver: canDeliver,    // <- IMPORTANTE: ahora siempre de BD si existe
+      canDeliver,                 // alias
       permissions,
       partner_tag: rawTag,
       partnerTag: rawTag,
       partner_tag_lower: tagLower,
       partnerTagLower: tagLower,
-      can_deliver: !!(row?.can_deliver ?? u.can_deliver),
     };
 
     return res.status(200).json({ user: safeUser });

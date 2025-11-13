@@ -58,6 +58,13 @@ export const PERMISSIONS_SCHEMA = {
       delete: 'Eliminar',
     },
   },
+  // Nuevo módulo: Tracking
+  tracking: {
+    label: 'Tracking',
+    actions: {
+      view: 'Ver',
+    },
+  },
 };
 
 // ==============================
@@ -114,6 +121,7 @@ export const ROLE_TEMPLATES = {
     products: { view: true },
     sales: { view: true, markPaid: true },
     clientAccount: { read: true, charge: true },
+    // tracking: { view: false } // por defecto no
   }),
 
   vendedor: mergeFalse(allFalse(), {
@@ -125,9 +133,10 @@ export const ROLE_TEMPLATES = {
       markPaid: true,
       updateInvoice: false,
       updatePayment: false,
-      // kpis: true, // (opcional) si ciertos vendedores deben ver KPIs
+      // kpis: true,
     },
     clientAccount: { read: true, charge: true },
+    // tracking: { view: false }
   }),
 
   supervisor: mergeFalse(allFalse(), {
@@ -139,16 +148,18 @@ export const ROLE_TEMPLATES = {
       markPaid: true,
       updateInvoice: true,
       updatePayment: true,
-      kpis: true, // supervisor puede ver KPIs
+      kpis: true,
     },
-    users: { view: true }, // solo ver
+    users: { view: true },
     clientAccount: { read: true, charge: true },
+    tracking: { view: true }, // <- puede ver Tracking
   }),
 
   produccion: mergeFalse(allFalse(), {
     products: { view: true, edit: true },
     clients: { view: true },
     clientAccount: { read: true },
+    // tracking: { view: false }
   }),
 };
 
@@ -197,6 +208,17 @@ export function tokensToPermsObject(list = []) {
   out.clientAccount.read   = has('client.account.read');
   out.clientAccount.charge = has('client.account.charge');
 
+  // tracking (acepta varias formas)
+  out.tracking.view =
+    has('tracking:view') ||
+    has('tracking.view') ||
+    has('tracking:read') ||
+    has('tracking.read') ||
+    has('gps:view') ||
+    has('gps.read') ||
+    has('locations:view') ||
+    has('locations.read');
+
   // users
   out.users.view   = has('users:read') || has('users:update') || has('users:create') || has('users:delete');
   out.users.create = has('users:create');
@@ -244,8 +266,13 @@ export function normalizeUser(user) {
     permissions: normalizePermissions(permsInput, role),
     partnerTag: user.partnerTag ?? user.partner_tag ?? null,
     sellerId: user.sellerId ?? user.id ?? null,
+
+    // flags reparto
+    canDeliver: user.canDeliver ?? user.can_deliver ?? false,
+    can_deliver: user.can_deliver ?? user.canDeliver ?? false,
   };
 }
+
 
 // ==============================
 // 4) localStorage helpers

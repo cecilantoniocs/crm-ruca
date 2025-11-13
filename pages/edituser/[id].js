@@ -64,12 +64,21 @@ function listToPermsObject(list = []) {
   out.sales.markPaid       = has('sales.mark_paid') || legacySalesUpdate;
   out.sales.updateInvoice  = has('sales.update_invoice') || legacySalesUpdate;
   out.sales.updatePayment  = has('sales.update_payment') || legacySalesUpdate;
-  // Nuevo: KPIs avanzados
+  // KPIs
   out.sales.kpis          = has('sales.kpis.view') || legacySalesUpdate;
 
   // clientAccount
   out.clientAccount.read   = has('client.account.read');
   out.clientAccount.charge = has('client.account.charge');
+
+  // tracking (acepta variantes)
+  out.tracking.view =
+    has('tracking:view') ||
+    has('tracking.read') ||
+    has('gps:view') ||
+    has('gps.read') ||
+    has('locations:view') ||
+    has('locations.read');
 
   // users
   out.users.view   = has('users:read') || has('users:update') || has('users:create') || has('users:delete');
@@ -107,12 +116,14 @@ function permsObjectToList(permsObj = {}) {
   if (permsObj.sales?.markPaid)       result.push('sales.mark_paid');
   if (permsObj.sales?.updateInvoice)  result.push('sales.update_invoice');
   if (permsObj.sales?.updatePayment)  result.push('sales.update_payment');
-  // Nuevo: KPIs
-  if (permsObj.sales?.kpis)          result.push('sales.kpis.view');
+  if (permsObj.sales?.kpis)           result.push('sales.kpis.view');
 
   // clientAccount
   if (permsObj.clientAccount?.read)   result.push('client.account.read');
   if (permsObj.clientAccount?.charge) result.push('client.account.charge');
+
+  // tracking
+  if (permsObj.tracking?.view) result.push('tracking.view');
 
   // users
   if (permsObj.users?.view)   result.push('users:read');
@@ -412,7 +423,7 @@ const EditUser = () => {
                             className="accent-indigo-600"
                             checked={checked}
                             onChange={() => togglePerm(mod, key)}
-                            disabled={permsDisabled}
+                            disabled={false}
                           />
                           {label}
                         </label>

@@ -3,6 +3,7 @@ import '../styles/globals.css';
 import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import axiosClient from '../config/axios';
+import 'leaflet/dist/leaflet.css';
 
 const PUBLIC_ROUTES = ['/login']; // agrega aquí rutas públicas extra si tuvieras
 
@@ -96,19 +97,78 @@ export default function App({ Component, pageProps }) {
     };
   }, []);
 
+  // Registro del Service Worker + manejo de updates con prompt
   useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker
-          .register('/sw.js')
-          .catch((err) => {
-            console.error('Error registrando SW:', err);
+    if (!('serviceWorker' in navigator)) return;
+
+    let refreshing = false;
+
+    const onControllerChange = () => {
+      if (refreshing) return;
+      refreshing = true;
+      // Cuando el nuevo SW toma control, recargamos para usar la nueva versión
+      window.location.reload();
+    };
+
+    const promptUserToRefresh = (registration) => {
+      if (!registration || !registration.waiting) return;
+
+      // POPUP simple. Si tienes un hook/UX propio, reemplaza este confirm por tu UI.
+      const accept = window.confirm('Hay una nueva versión de la app. ¿Actualizar ahora?');
+      if (accept) {
+        // Pedimos al SW nuevo que se active inmediatamente
+        registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+      }
+    };
+
+    const onMessageFromSW = async (event) => {
+      // SW nos avisa que hay una nueva versión instalada y “waiting”
+      if (event?.data?.type === 'SW_UPDATE_AVAILABLE' && navigator.serviceWorker.controller) {
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg) promptUserToRefresh(reg);
+      }
+    };
+
+    navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+    navigator.serviceWorker.addEventListener('message', onMessageFromSW);
+
+    const registerSW = async () => {
+      try {
+        const registration = await navigator.serviceWorker.register('/sw.js');
+
+        // Si ya hay una versión esperando (por ejemplo, volviste a la pestaña luego de un deploy)
+        if (registration.waiting) {
+          promptUserToRefresh(registration);
+        }
+
+        // Detecta cuando aparece un nuevo SW (updatefound)
+        registration.addEventListener('updatefound', () => {
+          const installing = registration.installing;
+          if (!installing) return;
+
+          installing.addEventListener('statechange', () => {
+            // Cuando el nuevo SW termina de instalarse y ya existe un controller,
+            // significa que es un update (no la primera instalación)
+            if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+              promptUserToRefresh(registration);
+            }
           });
-      });
-    }
+        });
+      } catch (err) {
+        console.error('Error registrando SW:', err);
+      }
+    };
+
+    // Registrar al cargar
+    window.addEventListener('load', registerSW);
+
+    return () => {
+      navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
+      navigator.serviceWorker.removeEventListener('message', onMessageFromSW);
+      window.removeEventListener('load', registerSW);
+    };
   }, []);
 
-  
   return (
     <AuthGuard>
       <Component {...pageProps} />

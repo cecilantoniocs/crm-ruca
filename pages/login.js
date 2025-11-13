@@ -4,15 +4,17 @@ import { useFormik } from 'formik';
 import * as Yup from 'yup';
 import { useRouter } from 'next/router';
 import Image from 'next/image';
+import Head from 'next/head';
 import axios from 'axios';
 
-// Logo fijo (asegúrate que sea un PNG grande, ej. 512x512)
+// Logo fijo (asegúrate que exista en /public/brand/)
 const LOGO_SRC = '/brand/rucapellan-logo.png';
 
 export default function LoginPage() {
   const router = useRouter();
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [useFallbackImg, setUseFallbackImg] = useState(false);
 
   // Si ya hay sesión, redirige fuera del login
   useEffect(() => {
@@ -60,6 +62,11 @@ export default function LoginPage() {
 
   return (
     <div className="relative min-h-screen bg-gradient-to-br from-gray-50 via-white to-[#F3D500]/15">
+      <Head>
+        {/* Para PWA: evita el warning del navegador */}
+        <meta name="mobile-web-app-capable" content="yes" />
+      </Head>
+
       {/* fondo sutil con patrón */}
       <div className="pointer-events-none absolute inset-0 [mask-image:radial-gradient(70%_50%_at_50%_0%,#000_0%,transparent_70%)]">
         <div className="h-full w-full bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:20px_20px]" />
@@ -73,16 +80,26 @@ export default function LoginPage() {
             {/* Marca */}
             <div className="flex flex-col items-center text-center">
               <div className="mb-4">
-                <Image
-                  src={LOGO_SRC}
-                  alt="Rucapellán"
-                  width={200}
-                  height={200}
-                  className="h-40 w-40 object-contain"
-                  priority
-                  sizes="160px"
-                  quality={100}
-                />
+                {useFallbackImg ? (
+                  <img
+                    src={LOGO_SRC}
+                    alt="Rucapellán"
+                    width={160}
+                    height={160}
+                    className="h-40 w-40 object-contain"
+                  />
+                ) : (
+                  <Image
+                    src={LOGO_SRC}
+                    alt="Rucapellán"
+                    width={200}
+                    height={200}
+                    className="h-40 w-40 object-contain"
+                    priority
+                    unoptimized
+                    onError={() => setUseFallbackImg(true)}
+                  />
+                )}
               </div>
               <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-coffee">
                 Rook<span className="text-coffee">App</span>
@@ -144,7 +161,7 @@ export default function LoginPage() {
             {/* Pie de tarjeta */}
             <div className="mt-6 text-center">
               <div className="inline-flex items-center gap-2 rounded-lg bg-[rgb(39,39,38)] px-3 py-1.5 text-xs font-medium text-white shadow-sm">
-                <span>CRM-Ruca v1.0</span>
+                <span>RookApp v4.0</span>
                 <span className="opacity-70">•</span>
                 <span>Developed by Cecil ⚡</span>
               </div>

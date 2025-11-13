@@ -1,49 +1,193 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { Users, Boxes, Truck, X, BarChart3, UserCog } from 'lucide-react';
+import { Users, Boxes, Truck, X, BarChart3, UserCog, Navigation } from 'lucide-react';
 import axiosClient from '../../config/axios';
+// 👇 helpers de permisos para verificación estricta
+import {
+  getCurrentUser as permsGetCurrentUser,
+  can as canPerm,
+} from '../../helpers/permissions';
 
 const Sidebar = ({ menuOpen = false, setMenuOpen }) => {
   const router = useRouter();
-  const [isAdminUI, setIsAdminUI] = useState(false);
+  const [canUsersUI, setCanUsersUI] = useState(false);
+  const [canTrackingUI, setCanTrackingUI] = useState(false);
+
+  // Helpers permisos (robustos a mayúsculas/arrays/objeto anidado/flags)
+  const normRole = (u) =>
+    (u?.role ?? u?.userRole ?? u?.type ?? '')
+      .toString()
+      .trim()
+      .toLowerCase();
+
+  /**
+   * Normaliza "u.permissions" a un Set de tokens minúsculos.
+   * Soporta:
+   *  - Array: ["users:read", ...]
+   *  - Objeto: { users: { view: true, ... } }
+   *  - String JSON: "[\"users:read\", ...]" o "{\"users\":{\"view\":true}}"
+   *  - String plano: "users:read, orders:read"
+   */
+  const permSetFrom = (u) => {
+    let perms = u?.permissions;
+
+    // Si es string, intentamos parsear JSON; si falla, fallback a split por coma
+    if (typeof perms === 'string') {
+      const s = perms.trim();
+      try {
+        if ((s.startsWith('[') && s.endsWith(']')) || (s.startsWith('{') && s.endsWith('}'))) {
+          perms = JSON.parse(s);
+        } else {
+          // "users:read, orders:read"
+          perms = s
+            .replace(/[\[\]"]/g, '')
+            .split(',')
+            .map((x) => x.trim())
+            .filter(Boolean);
+        }
+      } catch {
+        perms = s
+          .replace(/[\[\]"]/g, '')
+          .split(',')
+          .map((x) => x.trim())
+          .filter(Boolean);
+      }
+    }
+
+    // 1) Array de tokens
+    if (Array.isArray(perms)) {
+      return new Set(perms.map((p) => String(p).toLowerCase()));
+    }
+
+    // 2) Objeto anidado { module: { action: bool } }
+    if (perms && typeof perms === 'object') {
+      const flat = new Set();
+      for (const [mod, acts] of Object.entries(perms)) {
+        if (acts && typeof acts === 'object') {
+          for (const [act, val] of Object.entries(acts)) {
+            if (val) flat.add(`${String(mod).toLowerCase()}.${String(act).toLowerCase()}`);
+          }
+        }
+      }
+      return flat;
+    }
+
+    return new Set();
+  };
 
   const hasUsersPerm = (u) => {
-    const arr = Array.isArray(u?.permissions) ? u.permissions : [];
-    const lower = new Set(arr.map((p) => String(p).toLowerCase()));
-    return lower.has('*') || lower.has('users.list') || lower.has('users.read');
+    const lower = permSetFrom(u);
+    return (
+      lower.has('*') ||
+      lower.has('users.list') ||
+      lower.has('users.read') ||
+      lower.has('users:view') ||
+      lower.has('users:manage') ||
+      lower.has('users.view')
+    );
   };
+
+  const hasTrackingPerm = (u) => {
+    const lower = permSetFrom(u);
+    return (
+      lower.has('*') ||
+      lower.has('tracking.view') ||
+      lower.has('tracking:view') ||
+      lower.has('tracking.read') ||
+      lower.has('tracking:read') ||
+      lower.has('gps.view') ||
+      lower.has('gps.read') ||
+      lower.has('locations.view') ||
+      lower.has('locations.read')
+    );
+  };
+
   const isAdminFlag = (u) => !!(u?.is_admin || u?.isAdmin);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
+      // 1) Intento con API
       try {
         const { data } = await axiosClient.get('auth/me');
         const me = data?.user || null;
         if (mounted && me) {
-          setIsAdminUI(isAdminFlag(me) || hasUsersPerm(me));
+          const role = normRole(me);
+          const admin = isAdminFlag(me) || role === 'admin';
+          const supervisor = role === 'supervisor';
+
+          // Heurísticos por tokens del backend (vengan como vengan)
+          const usersOkHeur = admin || hasUsersPerm(me);
+          const trackOkHeur = admin || supervisor || hasTrackingPerm(me);
+
+          // 🔒 Chequeo estricto contra el usuario normalizado en localStorage
+          const localU = permsGetCurrentUser();
+          const usersStrict = admin || canPerm('users.view', null, localU) || canPerm('users.read', null, localU);
+          const trackStrict = admin || canPerm('tracking.view', null, localU);
+
+          setCanUsersUI(usersOkHeur || usersStrict);             // ver Users si tiene "users.read/view" (aunque sea solo lectura)
+          setCanTrackingUI(trackOkHeur && trackStrict);           // tracking requiere pasar ambos
           return;
         }
-      } catch {}
+      } catch {
+        // sigue al fallback
+      }
+
+      // 2) Fallback localStorage
       try {
-        const raw = typeof window !== 'undefined' ? localStorage.getItem('userData') : null;
+        const raw =
+          typeof window !== 'undefined' ? localStorage.getItem('userData') : null;
         const u = raw ? JSON.parse(raw) : null;
-        const roleRaw = (u?.role ?? u?.userRole ?? u?.type ?? '').toString().trim().toLowerCase();
-        const hasPerm =
-          Array.isArray(u?.permissions) &&
-          u.permissions.some((p) =>
-            ['users:manage', 'users:view'].includes(String(p).toLowerCase())
-          );
-        const flag = !!u?.isAdmin;
+        const role = normRole(u);
+        const admin = !!u?.isAdmin || role === 'admin';
+        const supervisor = role === 'supervisor';
+
+        const lower = permSetFrom(u);
+
+        // Heurísticos locales
+        const usersOkHeur =
+          admin ||
+          lower.has('*') ||
+          lower.has('users.list') ||
+          lower.has('users.read') ||
+          lower.has('users:view') ||
+          lower.has('users:manage') ||
+          lower.has('users.view');
+
+        const trackOkHeur =
+          admin ||
+          supervisor ||
+          lower.has('*') ||
+          lower.has('tracking.view') ||
+          lower.has('tracking:view') ||
+          lower.has('tracking.read') ||
+          lower.has('tracking:read') ||
+          lower.has('gps.view') ||
+          lower.has('gps.read') ||
+          lower.has('locations.view') ||
+          lower.has('locations.read');
+
+        // 🔒 Estricto con helper (por si el objeto ya está normalizado)
+        const localU = permsGetCurrentUser();
+        const usersStrict = admin || canPerm('users.view', null, localU) || canPerm('users.read', null, localU);
+        const trackStrict = admin || canPerm('tracking.view', null, localU);
+
         if (mounted) {
-          setIsAdminUI(roleRaw === 'admin' || roleRaw === 'administrador' || hasPerm || flag);
+          setCanUsersUI(usersOkHeur || usersStrict);
+          setCanTrackingUI(trackOkHeur && trackStrict);
         }
       } catch {
-        if (mounted) setIsAdminUI(false);
+        if (mounted) {
+          setCanUsersUI(false);
+          setCanTrackingUI(false);
+        }
       }
     })();
-    return () => { mounted = false; };
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const isActive = (path) =>
@@ -75,7 +219,6 @@ const Sidebar = ({ menuOpen = false, setMenuOpen }) => {
 
       <aside
         className={[
-          // ancho: móvil se mantiene 16rem, desktop se estrecha a 14rem
           'fixed inset-y-0 left-0 w-64 sm:w-56 z-50 sm:z-40',
           'bg-white border-r border-gray-200',
           'flex flex-col h-[100dvh] p-4',
@@ -119,7 +262,21 @@ const Sidebar = ({ menuOpen = false, setMenuOpen }) => {
             <span>Ventas</span>
           </Link>
 
-          {isAdminUI && (
+          {/* Tracking (permiso tracking.view, gps.view, etc.) */}
+          {canTrackingUI && (
+            <Link
+              href="/tracking"
+              className={navItemClass('/tracking')}
+              onClick={closeMenu}
+              title="Seguimiento GPS"
+            >
+              <Navigation size={18} />
+              <span>Tracking</span>
+            </Link>
+          )}
+
+          {/* Usuarios (mostrar incluso solo con users:read/view) */}
+          {canUsersUI && (
             <Link href="/users" className={navItemClass('/users')} onClick={closeMenu}>
               <UserCog size={18} />
               <span>Usuarios</span>
