@@ -2,11 +2,39 @@
 import { supabaseServer } from '@/lib/supabaseServer';
 import { getReqUser, requirePerm } from '@/server/guard';
 
-function buildDateRange(dateYMD, fromHHmm = '00:00', toHHmm = '23:59') {
-  // Asume TZ del server; en Supabase conviene comparar por texto YYYY-MM-DD HH:MM
-  const start = `${dateYMD} ${fromHHmm}:00`;
-  const end   = `${dateYMD} ${toHHmm}:59`;
-  return { start, end };
+// --- helpers TZ: convierte Y-M-D + HH:mm en UTC usando America/Santiago (sin deps) ---
+const CL_TZ = 'America/Santiago';
+
+function parseHM(hm = '00:00') {
+  const [h = '00', m = '00'] = String(hm).split(':');
+  return { h: Math.max(0, +h || 0), m: Math.max(0, +m || 0) };
+}
+
+/**
+ * Retorna un Date en UTC que representa la hora local (zona IANA) indicada.
+ * Truco: usamos toLocaleString con { timeZone } para obtener el offset correcto (incluye DST).
+ */
+function zonedLocalToUTC(dateYMD, hhmm = '00:00', timeZone = CL_TZ) {
+  const [Y, M, D] = String(dateYMD).split('-').map(Number);
+  const { h, m } = parseHM(hhmm);
+  // punto base en UTC con los números "tal cual"
+  const baseUtc = new Date(Date.UTC(Y, (M || 1) - 1, D || 1, h, m, 0, 0));
+  // la misma marca formateada en la zona -> parseada como local del runtime
+  const asTzLocal = new Date(baseUtc.toLocaleString('en-US', { timeZone }));
+  // diferencia entre "lo que sería" en esa zona y el UTC base
+  const diffMs = baseUtc.getTime() - asTzLocal.getTime();
+  return new Date(baseUtc.getTime() + diffMs);
+}
+
+/**
+ * Rango en ISO UTC para consultar en Supabase sin desfases.
+ * end incluye los 59s y 999ms para cubrir el minuto completo.
+ */
+function buildDateRange(dateYMD, fromHHmm = '00:00', toHHmm = '23:59', timeZone = CL_TZ) {
+  const startUTC = zonedLocalToUTC(dateYMD, fromHHmm, timeZone);
+  const endUTC   = zonedLocalToUTC(dateYMD, toHHmm,   timeZone);
+  endUTC.setSeconds(endUTC.getSeconds() + 59, 999);
+  return { startISO: startUTC.toISOString(), endISO: endUTC.toISOString() };
 }
 
 export default async function handler(req, res) {
@@ -17,22 +45,22 @@ export default async function handler(req, res) {
 
   try {
     // Permiso específico de Tracking
-    requirePerm(user, 'tracking.view'); // Admin debería pasar por requirePerm
+    requirePerm(user, 'tracking.view');
 
     const { courierId, date, from = '00:00', to = '23:59' } = req.query || {};
     if (!date) return res.status(400).json({ error: 'date requerido (YYYY-MM-DD)' });
 
-    const { start, end } = buildDateRange(String(date), String(from), String(to));
+    // 🔧 ahora el rango es ISO UTC (sin deps, maneja DST de Chile)
+    const { startISO, endISO } = buildDateRange(String(date), String(from), String(to));
 
     let q = supabaseServer
       .from('courier_locations')
       .select('id,courier_id,lat,lng,accuracy,created_at')
-      .gte('created_at', start)
-      .lte('created_at', end)
+      .gte('created_at', startISO)
+      .lte('created_at', endISO)
       .order('created_at', { ascending: true })
       .limit(5000);
 
-    // Soportar "Todos"
     if (courierId && courierId !== 'all') {
       q = q.eq('courier_id', courierId);
     }
@@ -64,7 +92,7 @@ export default async function handler(req, res) {
         lat: r.lat,
         lng: r.lng,
         accuracy: r.accuracy,
-        createdAt: r.created_at,
+        createdAt: r.created_at, // viene en ISO UTC; el front lo muestra en local con toLocaleString()
       };
     });
 

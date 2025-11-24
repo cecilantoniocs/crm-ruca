@@ -1,13 +1,17 @@
-// pages/client.js
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+// /pages/client.js
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import Layout from '../components/Layout';
 import { useRouter } from 'next/router';
 import axiosClient from '../config/axios';
-import { Phone, UserPlus, Search, MoreVertical, ShoppingCart, Receipt } from 'lucide-react';
+import { Phone, UserPlus, Search, MoreVertical, ShoppingCart, Receipt, Save, Check } from 'lucide-react';
 
 // ⬇️ Pull-to-refresh (window)
 import PullToRefreshHeader from '../components/PullToRefreshHeader';
 import usePullToRefreshWindow from '../hooks/usePullToRefreshWindow';
+
+// 🔹 Usuario + prefs
+import { getCurrentUser } from '../helpers/permissions';
+import { loadUserFilterPrefs, saveUserFilterPrefs, resolveDefaultOwner } from '../helpers/filterPrefs';
 
 const pillCls = 'inline-flex items-center rounded-full ring-1 px-2 py-0.5 text-[11px] font-medium';
 
@@ -24,6 +28,16 @@ const ClientPage = () => {
   const [ownerFilter, setOwnerFilter] = useState('all'); // all | rucapellan | cecil
   const [typeFilter, setTypeFilter] = useState('all');   // all | b2b | b2c
 
+  // 🔹 Usuario actual
+  const me = useMemo(() => getCurrentUser?.(), []);
+
+  // 🔹 Persistencia de filtros (misma lógica que sales.js / orders.js)
+  const FILTERS_KEY = 'clients.filters.v1';
+  const [savedFilters, setSavedFilters] = useState(null);
+  const [justSaved, setJustSaved] = useState(false);
+  const baselineSet = useRef(false);
+  const loadedFromStorageRef = useRef(false);
+
   // Debounce 300ms
   useEffect(() => {
     const t = setTimeout(() => setDebounced(searchTerm.trim().toLowerCase()), 300);
@@ -37,7 +51,80 @@ const ClientPage = () => {
     return () => window.removeEventListener('click', close);
   }, []);
 
-  // ✅ Refetch unificado (misma lógica que tenías)
+  // 1) Cargar filtros guardados desde localStorage
+  useEffect(() => {
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem(FILTERS_KEY) : null;
+      if (raw) {
+        const f = JSON.parse(raw);
+        if (f && typeof f === 'object') {
+          if (typeof f.searchTerm === 'string') setSearchTerm(f.searchTerm);
+          if (f.ownerFilter) setOwnerFilter(f.ownerFilter);
+          if (f.typeFilter) setTypeFilter(f.typeFilter);
+          setSavedFilters({
+            searchTerm: f.searchTerm ?? '',
+            ownerFilter: f.ownerFilter ?? 'all',
+            typeFilter: f.typeFilter ?? 'all',
+          });
+          baselineSet.current = true;
+          loadedFromStorageRef.current = true;
+        }
+      }
+    } catch (e) {
+      console.warn('No se pudieron cargar filtros guardados en Clients', e);
+    }
+  }, []);
+
+  // 2) Si no vino de storage, resolver owner por preferencias/partner_tag
+  useEffect(() => {
+    if (loadedFromStorageRef.current) return;
+    const prefs = loadUserFilterPrefs(me?.email || 'anon');
+    const defOwner = resolveDefaultOwner(me, prefs, 'clients');
+    setOwnerFilter(defOwner);
+  }, [me]);
+
+  // Filtros actuales
+  const currentFilters = useMemo(
+    () => ({ searchTerm, ownerFilter, typeFilter }),
+    [searchTerm, ownerFilter, typeFilter]
+  );
+
+  // Crear baseline una vez que haya estado inicial
+  useEffect(() => {
+    if (baselineSet.current) return;
+    setSavedFilters({ ...currentFilters });
+    baselineSet.current = true;
+  }, [currentFilters]);
+
+  // Comparar si hay cambios
+  const isDirty = useMemo(() => {
+    if (!savedFilters) return true;
+    try {
+      return JSON.stringify(savedFilters) !== JSON.stringify(currentFilters);
+    } catch {
+      return true;
+    }
+  }, [savedFilters, currentFilters]);
+
+  // Guardar filtros (localStorage + prefs owner)
+  const saveFilters = useCallback(() => {
+    try {
+      localStorage.setItem(FILTERS_KEY, JSON.stringify(currentFilters));
+      setSavedFilters(currentFilters);
+
+      // Persistir owner en prefs usuario para consistencia cross-páginas
+      const prefs = loadUserFilterPrefs(me?.email || 'anon');
+      const next = { ...prefs, clients: { ...(prefs?.clients || {}), owner: currentFilters.ownerFilter } };
+      saveUserFilterPrefs(me?.email || 'anon', next);
+
+      setJustSaved(true);
+      setTimeout(() => setJustSaved(false), 1200);
+    } catch (e) {
+      alert('No se pudieron guardar los filtros.');
+    }
+  }, [currentFilters, me]);
+
+  // ✅ Refetch unificado
   const refetch = useCallback(async () => {
     try {
       setLoading(true);
@@ -162,7 +249,7 @@ const ClientPage = () => {
       </div>
 
       {/* Filtros superiores */}
-      <div className="grid gap-3 sm:grid-cols-3 sm:items-end mb-6">
+      <div className="grid gap-3 sm:grid-cols-3 sm:items-end mb-2">
         {/* Buscar */}
         <div className="relative">
           <label className="block text-xs font-medium text-gray-600 mb-1">Buscar</label>
@@ -181,15 +268,17 @@ const ClientPage = () => {
         {/* Asignado a */}
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Asignado a</label>
-          <select
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600"
-            value={ownerFilter}
-            onChange={(e) => setOwnerFilter(e.target.value)}
-          >
-            <option value="all">Todos</option>
-            <option value="rucapellan">Rucapellan</option>
-            <option value="cecil">Cecil</option>
-          </select>
+          <div className="flex items-center gap-2">
+            <select
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600"
+              value={ownerFilter}
+              onChange={(e) => setOwnerFilter(e.target.value)}
+            >
+              <option value="all">Todos</option>
+              <option value="rucapellan">Rucapellan</option>
+              <option value="cecil">Cecil</option>
+            </select>
+          </div>
         </div>
 
         {/* Tipo */}
@@ -205,6 +294,25 @@ const ClientPage = () => {
             <option value="b2c">B2C</option>
           </select>
         </div>
+      </div>
+
+      {/* Botón Guardar filtros + aviso de guardado (alineado a la derecha, como sales/orders) */}
+      <div className="mb-6 flex items-center justify-end gap-3">
+        {justSaved && (
+          <span className="inline-flex items-center gap-1 text-emerald-700 text-sm">
+            <Check size={16} /> Guardado
+          </span>
+        )}
+        {isDirty && (
+          <button
+            type="button"
+            onClick={saveFilters}
+            title="Guardar filtros por defecto"
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white hover:bg-gray-50"
+          >
+            <Save size={16} /> Guardar
+          </button>
+        )}
       </div>
 
       {loading && <p className="text-gray-600">Cargando clientes…</p>}
@@ -298,7 +406,7 @@ const ClientPage = () => {
                       </a>
                     )}
 
-                    {/* NUEVO: botón Cuenta (móvil) */}
+                    {/* Cuenta (móvil) */}
                     <button
                       onClick={() => handleAccount(c.id)}
                       className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-sky-500 text-white hover:bg-sky-600 shadow-sm active:scale-95 transition"
@@ -324,7 +432,7 @@ const ClientPage = () => {
         </div>
       )}
 
-      {/* DESKTOP: Tabla (estilo productos) */}
+      {/* DESKTOP: Tabla */}
       {!loading && !loadError && filteredClients.length > 0 && (
         <div className="hidden sm:block">
           {/* contenedor scroll horizontal sin centrar */}
@@ -332,6 +440,8 @@ const ClientPage = () => {
             <table className="w-full table-auto">
               <thead className="bg-gray-50 sticky top-0 z-20">
                 <tr className="text-left">
+                  {/* Columna N al inicio */}
+                  <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">N</th>
                   <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Nombre</th>
                   <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Local</th>
                   <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Dirección</th>
@@ -341,7 +451,7 @@ const ClientPage = () => {
                   <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Tipo</th>
                   <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Cartera</th>
                   <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-center">Pedido</th>
-                  {/* NUEVO: columna Cuenta */}
+                  {/* Columna Cuenta */}
                   <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-center">Cuenta</th>
                   <th className="px-4 lg:px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-center">Acciones</th>
                 </tr>
@@ -356,6 +466,9 @@ const ClientPage = () => {
                       key={c.id}
                       className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-colors`}
                     >
+                      {/* celda N */}
+                      <td className="px-4 lg:px-6 py-3 text-sm text-gray-500">{idx + 1}</td>
+
                       <td className="px-4 lg:px-6 py-3 text-sm text-coffee-900">{c.name || '—'}</td>
                       <td className="px-4 lg:px-6 py-3 text-sm text-coffee-900">{c.nombre_local || '—'}</td>
                       <td className="px-4 lg:px-6 py-3 text-sm text-coffee-900">{c.dir1 || '—'}</td>
@@ -385,7 +498,7 @@ const ClientPage = () => {
                         </button>
                       </td>
 
-                      {/* NUEVO: Cuenta */}
+                      {/* Cuenta */}
                       <td className="px-4 lg:px-6 py-3 text-center">
                         <button
                           onClick={(e) => { e.stopPropagation(); handleAccount(c.id); }}

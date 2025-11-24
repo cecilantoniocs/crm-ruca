@@ -23,6 +23,8 @@
     "axios": "^1.7.7",
     "bcryptjs": "^3.0.2",
     "cookie": "^1.0.2",
+    "date-fns": "^4.1.0",
+    "date-fns-tz": "^3.2.0",
     "formik": "^2.4.6",
     "jose": "^6.1.0",
     "json-server": "^0.17.4",

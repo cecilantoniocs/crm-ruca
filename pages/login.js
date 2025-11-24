@@ -7,13 +7,15 @@ import Image from 'next/image';
 import Head from 'next/head';
 import axios from 'axios';
 
-// Logo fijo (asegúrate que exista en /public/brand/)
+// Ruta fija en /public (asegúrate del nombre exacto y mayúsculas/minúsculas)
 const LOGO_SRC = '/brand/rucapellan-logo.png';
 
 export default function LoginPage() {
   const router = useRouter();
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // control de fallback: si falla <Image>, mostramos <img>
   const [useFallbackImg, setUseFallbackImg] = useState(false);
 
   // Si ya hay sesión, redirige fuera del login
@@ -63,8 +65,20 @@ export default function LoginPage() {
   return (
     <div className="relative min-h-screen bg-gradient-to-br from-gray-50 via-white to-[#F3D500]/15">
       <Head>
-        {/* Para PWA: evita el warning del navegador */}
+        {/* PWA / meta mínima */}
         <meta name="mobile-web-app-capable" content="yes" />
+
+        {/* Preload del logo para que aparezca SIEMPRE a la primera */}
+        <link
+          rel="preload"
+          as="image"
+          href={LOGO_SRC}
+          // type opcional si quieres especificar mime: type="image/png"
+          fetchpriority="high"
+        />
+
+        {/* Favicon opcional si lo tienes */}
+        <link rel="icon" href="/favicon.ico" />
       </Head>
 
       {/* fondo sutil con patrón */}
@@ -72,20 +86,23 @@ export default function LoginPage() {
         <div className="h-full w-full bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:20px_20px]" />
       </div>
 
-      {/* movemos la tarjeta un poco hacia arriba */}
+      {/* tarjeta centrada */}
       <div className="relative z-10 min-h-screen flex items-start justify-center px-4 pt-10 md:pt-16">
         <div className="w-full max-w-md">
           {/* Tarjeta */}
           <div className="rounded-2xl border border-gray-200 bg-white/80 backdrop-blur-sm shadow-xl p-6 sm:p-8">
             {/* Marca */}
             <div className="flex flex-col items-center text-center">
-              <div className="mb-4">
+              <div className="mb-4 h-40 w-40">
                 {useFallbackImg ? (
                   <img
                     src={LOGO_SRC}
                     alt="Rucapellán"
-                    width={160}
-                    height={160}
+                    width={200}
+                    height={200}
+                    loading="eager"
+                    decoding="sync"
+                    fetchPriority="high"
                     className="h-40 w-40 object-contain"
                   />
                 ) : (
@@ -94,10 +111,18 @@ export default function LoginPage() {
                     alt="Rucapellán"
                     width={200}
                     height={200}
-                    className="h-40 w-40 object-contain"
+                    // Evita el lazy en el logo de marca
                     priority
-                    unoptimized
+                    // Carga sincrónica para que no parpadee
+                    decoding="sync"
+                    // Prop válida en React 18 / Next 15 (camelCase)
+                    fetchPriority="high"
+                    className="h-40 w-40 object-contain"
+                    // Si hubiera cualquier problema, forzamos fallback a <img>
                     onError={() => setUseFallbackImg(true)}
+                    // En dev a veces las optimizaciones causan parpadeos;
+                    // si prefieres, puedes activar unoptimized:
+                    // unoptimized
                   />
                 )}
               </div>
@@ -161,7 +186,7 @@ export default function LoginPage() {
             {/* Pie de tarjeta */}
             <div className="mt-6 text-center">
               <div className="inline-flex items-center gap-2 rounded-lg bg-[rgb(39,39,38)] px-3 py-1.5 text-xs font-medium text-white shadow-sm">
-                <span>RookApp v4.0</span>
+                <span>RookApp v5.0</span>
                 <span className="opacity-70">•</span>
                 <span>Developed by Cecil ⚡</span>
               </div>

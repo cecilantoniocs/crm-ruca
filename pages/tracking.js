@@ -97,7 +97,7 @@ export default function TrackingPage() {
     return makeTruckImgIcon(url, { blink });
   };
 
-  // cargar repartidores (solo can_deliver / role repartidor según tu endpoint)
+  // cargar repartidores
   useEffect(() => {
     if (!canView) return;
     axiosClient.get('gps/couriers')
@@ -213,7 +213,7 @@ export default function TrackingPage() {
         {/* Header con el mismo estilo que “Pedidos” */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-2">
           <h1 className="text-3xl font-bold text-coffee tracking-tight">
-            Gestión de <span className="text-brand-600">Tracking</span>
+            Tracking de <span className="text-brand-600">Repartidores</span>
           </h1>
         </div>
 
@@ -293,8 +293,8 @@ export default function TrackingPage() {
 
         {/* Contenedor relativo para botón flotante y mapa */}
         <div className="relative h-[70vh] w-full rounded-xl overflow-hidden border border-gray-200">
-          {/* Botón de capa (no lo tapa el mapa gracias al z-index) */}
-          <div className="absolute right-3 top-3 z-50">
+          {/* Botón de capa (z-10 para no sobreponer la sidebar) */}
+          <div className="absolute right-3 top-3 z-10">
             <button
               onClick={() => setBasemap(basemap === 'sat' ? 'streets' : 'sat')}
               className="px-3 py-1.5 rounded-lg bg-white/95 backdrop-blur border border-gray-300 text-sm shadow hover:bg-white"
@@ -326,7 +326,7 @@ export default function TrackingPage() {
             )}
 
             {/* Marcadores */}
-            {points.map((p, i) => {
+            {points.map((p) => {
               const key = p.id ?? `${p.courierId}|${p.lat}|${p.lng}|${p.createdAt}`;
               const blink = blinkingKeys.has(key);
               return (
@@ -356,7 +356,7 @@ export default function TrackingPage() {
               );
             })}
 
-            {/* Polilíneas por courier (mismo color asignado) */}
+            {/* Polilíneas por courier */}
             {[...groups.entries()].map(([cid, arr]) =>
               arr.length > 1 ? (
                 <Polyline
@@ -380,6 +380,15 @@ export default function TrackingPage() {
         .leaflet-marker-icon.truck-blink {
           animation: truck-blink-kf 1s infinite;
           filter: drop-shadow(0 2px 3px rgba(0,0,0,0.35));
+        }
+
+        /* Mantener Leaflet por debajo de overlays (sidebar, etc.) */
+        .leaflet-container,
+        .leaflet-pane,
+        .leaflet-top,
+        .leaflet-bottom,
+        .leaflet-control {
+          z-index: 0 !important;
         }
       `}</style>
     </Layout>

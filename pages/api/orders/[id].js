@@ -91,7 +91,8 @@ const itemSchema = z.object({
   product_id: z.union([z.string(), z.number()]),
   name: z.string().min(1),
   sku: z.string().min(1),
-  image_url: z.string().url().optional().nullable(),
+  // 🔧 Relax: permitir '' además de URL válida
+  image_url: z.union([z.string().url(), z.literal('')]).optional().nullable(),
   qty: z.union([z.number(), z.string()]).transform((v) => {
     const n = Number(v);
     if (!Number.isInteger(n) || n <= 0) throw new Error('qty inválido');
@@ -147,7 +148,8 @@ const patchSchema = z
 
 // ---------- helpers DB ----------
 async function fetchOrderWithItems(orderId) {
-  return supabaseServer
+  // intento con la relación order_items
+  let q = await supabaseServer
     .from('orders')
     .select(`
       id, client_id, client_name, client_local, seller_id, delivered_by,
@@ -157,16 +159,40 @@ async function fetchOrderWithItems(orderId) {
     `)
     .eq('id', orderId)
     .maybeSingle();
+
+  // fallback: si falla la relación (por permisos/falta de tabla), reintenta sin order_items
+  if (q.error) {
+    console.warn('[orders/:id] fallback sin order_items:', q.error?.message || q.error);
+    q = await supabaseServer
+      .from('orders')
+      .select(`
+        id, client_id, client_name, client_local, seller_id, delivered_by,
+        status, total, delivery_date, delivered_at, payment_method,
+        invoice, invoice_sent, paid, created_at, updated_at
+      `)
+      .eq('id', orderId)
+      .maybeSingle();
+
+    // adapta el shape para que toCamel vea order_items: []
+    if (!q.error && q.data) q.data.order_items = [];
+  }
+
+  return q;
 }
 
 async function sumPaidForOrder(orderId) {
-  const { data, error } = await supabaseServer
-    .from('payment_items')
-    .select('amount')
-    .eq('order_id', orderId);
+  try {
+    const { data, error } = await supabaseServer
+      .from('payment_items')
+      .select('amount')
+      .eq('order_id', orderId);
 
-  if (error) throw error;
-  return (data || []).reduce((acc, it) => acc + (Number(it.amount) || 0), 0);
+    if (error) throw error;
+    return (data || []).reduce((acc, it) => acc + (Number(it.amount) || 0), 0);
+  } catch (_e) {
+    // si falla la tabla/relación de pagos, asumimos 0 en vez de 500
+    return 0;
+  }
 }
 
 // ---------- fallback seguro: limpiar abonos solo de ESTA orden y borrar pagos huérfanos ----------
@@ -213,9 +239,12 @@ export default async function handler(req, res) {
   const user = getReqUser(req);
   const { id } = req.query;
 
+  // 🔒 Guardas tempranas: evita 500 cuando no hay sesión/permiso
+  if (!user) return res.status(401).json({ error: 'No autenticado' });
+
   try {
     if (req.method === 'GET') {
-      requirePerm(user, 'orders.read');
+      try { requirePerm(user, 'orders.read'); } catch { return res.status(403).json({ error: 'Sin permiso: orders.read' }); }
 
       const { data, error } = await fetchOrderWithItems(id);
       if (error) throw error;
@@ -223,38 +252,45 @@ export default async function handler(req, res) {
 
       const dto = toCamel(data);
 
-      // pagos de esta orden
-      const { data: pi, error: piErr } = await supabaseServer
-        .from('payment_items')
-        .select(`
-          id, payment_id, order_id, amount, created_at,
-          payments ( id, method, paid_at, client_id, created_at )
-        `)
-        .eq('order_id', id);
+      // pagos de esta orden — defensivo
+      try {
+        const { data: pi, error: piErr } = await supabaseServer
+          .from('payment_items')
+          .select(`
+            id, payment_id, order_id, amount, created_at,
+            payments ( id, method, paid_at, client_id, created_at )
+          `)
+          .eq('order_id', id);
 
-      if (piErr) throw piErr;
+        if (piErr) throw piErr;
 
-      const payments = (pi || []).map((row) => {
-        const payMethod = row.payments?.method ?? null;
-        return {
-          id: row.payment_id,
-          itemId: row.id,
-          amount: Number(row.amount) || 0,
-          createdAt: row.created_at,
-          method: payMethod,
-          type: payMethod,
-          reference: null,
-          paidAt: row.payments?.paid_at || null,
-          memo: null,
-        };
-      });
+        const payments = (pi || []).map((row) => {
+          const payMethod = row.payments?.method ?? null;
+          return {
+            id: row.payment_id,
+            itemId: row.id,
+            amount: Number(row.amount) || 0,
+            createdAt: row.created_at,
+            method: payMethod,
+            type: payMethod,
+            reference: null,
+            paidAt: row.payments?.paid_at || null,
+            memo: null,
+          };
+        });
 
-      const amountPaid = payments.reduce((acc, p) => acc + (p.amount || 0), 0);
-      const total = Number(dto.total) || 0;
+        const amountPaid = payments.reduce((acc, p) => acc + (p.amount || 0), 0);
+        const total = Number(dto.total) || 0;
 
-      dto.payments = payments;
-      dto.amountPaid = amountPaid;
-      dto.balance = Math.max(0, total - amountPaid);
+        dto.payments = payments;
+        dto.amountPaid = amountPaid;
+        dto.balance = Math.max(0, total - amountPaid);
+      } catch (_e) {
+        // si falla payment_items o la relación payments, no botar todo
+        dto.payments = [];
+        dto.amountPaid = 0;
+        dto.balance = Math.max(0, Number(dto.total) || 0);
+      }
 
       return res.status(200).json(dto);
     }
@@ -297,13 +333,13 @@ export default async function handler(req, res) {
         Object.prototype.hasOwnProperty.call(body, 'items');
 
       if (touchesStructural) {
-        requirePerm(user, 'orders.update');
+        try { requirePerm(user, 'orders.update'); } catch { return res.status(403).json({ error: 'Sin permiso: orders.update' }); }
       }
       if (touchesPaymentMethod) {
-        requirePerm(user, 'sales.update_payment');
+        try { requirePerm(user, 'sales.update_payment'); } catch { return res.status(403).json({ error: 'Sin permiso: sales.update_payment' }); }
       }
       if (touchesInvoice) {
-        requirePerm(user, 'sales.update_invoice');
+        try { requirePerm(user, 'sales.update_invoice'); } catch { return res.status(403).json({ error: 'Sin permiso: sales.update_invoice' }); }
       }
       if (touchesPaid) {
         const canMarkPaid =
@@ -311,7 +347,7 @@ export default async function handler(req, res) {
           userHasPerm(user, 'client.account.charge');
 
         if (!canMarkPaid) {
-          requirePerm(user, 'sales.mark_paid');
+          return res.status(403).json({ error: 'Sin permiso: sales.mark_paid' });
         }
       }
 
@@ -362,7 +398,13 @@ export default async function handler(req, res) {
             payments ( id, method, paid_at, client_id, created_at )
           `)
           .eq('order_id', id);
-        if (piErr3) throw piErr3;
+        if (piErr3) {
+          // si falla, no detengas el flujo
+          dto.payments = [];
+          dto.amountPaid = 0;
+          dto.balance = Math.max(0, Number(dto.total) || 0);
+          return res.status(200).json(dto);
+        }
 
         const payments3 = (pi3 || []).map((row) => ({
           id: row.payment_id,
@@ -491,42 +533,48 @@ export default async function handler(req, res) {
 
       const dto = toCamel(full);
 
-      const { data: pi2, error: piErr2 } = await supabaseServer
-        .from('payment_items')
-        .select(`
-          id, payment_id, order_id, amount, created_at,
-          payments ( id, method, paid_at, client_id, created_at )
-        `)
-        .eq('order_id', id);
+      try {
+        const { data: pi2, error: piErr2 } = await supabaseServer
+          .from('payment_items')
+          .select(`
+            id, payment_id, order_id, amount, created_at,
+            payments ( id, method, paid_at, client_id, created_at )
+          `)
+          .eq('order_id', id);
 
-      if (piErr2) throw piErr2;
+        if (piErr2) throw piErr2;
 
-      const payments2 = (pi2 || []).map((row) => {
-        const payMethod = row.payments?.method ?? null;
-        return {
-          id: row.payment_id,
-          itemId: row.id,
-          amount: Number(row.amount) || 0,
-          createdAt: row.created_at,
-          method: payMethod,
-          type: payMethod,
-          reference: null,
-          paidAt: row.payments?.paid_at || null,
-          memo: null,
-        };
-      });
+        const payments2 = (pi2 || []).map((row) => {
+          const payMethod = row.payments?.method ?? null;
+          return {
+            id: row.payment_id,
+            itemId: row.id,
+            amount: Number(row.amount) || 0,
+            createdAt: row.created_at,
+            method: payMethod,
+            type: payMethod,
+            reference: null,
+            paidAt: row.payments?.paid_at || null,
+            memo: null,
+          };
+        });
 
-      const amountPaid = payments2.reduce((a, b) => a + (Number(b.amount) || 0), 0);
-      const total = Number(dto.total) || 0;
-      dto.payments = payments2;
-      dto.amountPaid = amountPaid;
-      dto.balance = Math.max(0, total - amountPaid);
+        const amountPaid = payments2.reduce((a, b) => a + (Number(b.amount) || 0), 0);
+        const total = Number(dto.total) || 0;
+        dto.payments = payments2;
+        dto.amountPaid = amountPaid;
+        dto.balance = Math.max(0, total - amountPaid);
+      } catch (_e) {
+        dto.payments = [];
+        dto.amountPaid = 0;
+        dto.balance = Math.max(0, Number(dto.total) || 0);
+      }
 
       return res.status(200).json(dto);
     }
 
     if (req.method === 'DELETE') {
-      requirePerm(user, 'orders.delete');
+      try { requirePerm(user, 'orders.delete'); } catch { return res.status(403).json({ error: 'Sin permiso: orders.delete' }); }
 
       const { error } = await supabaseServer.from('orders').delete().eq('id', id);
       if (error) throw error;
@@ -536,8 +584,9 @@ export default async function handler(req, res) {
     res.setHeader('Allow', 'GET, PATCH, DELETE');
     return res.status(405).json({ error: 'Method Not Allowed' });
   } catch (e) {
-    const status = e.status || (e.message === 'Sin cambios' ? 400 : 500);
-    const message = e.msg || e.message || 'Error';
+    const isZod = e?.name === 'ZodError' || /Zod/i.test(e?.message || '');
+    const status = isZod ? 400 : (e?.status || 500);
+    const message = e?.msg || e?.message || 'Error';
     console.error('API /orders/[id]', e);
     return res.status(status).json({ error: message });
   }

@@ -1,4 +1,4 @@
-// pages/orders.js
+// /pages/orders.js
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { useRouter } from 'next/router';
@@ -14,12 +14,23 @@ import {
   Pencil,
   User,
   ExternalLink,
+  Truck,
+  Users as UsersIcon,
+  Receipt,
+  Save,
+  Check,
 } from 'lucide-react';
 import { getCurrentSeller, getClients } from '../helpers';
 import PullToRefreshHeader from '../components/PullToRefreshHeader';
 import usePullToRefreshWindow from '../hooks/usePullToRefreshWindow';
 
+// 🔹 NUEVO: traer usuario y helpers de preferencias (seguimos usando owner por prefs)
+import { getCurrentUser } from '../helpers/permissions';
+import { loadUserFilterPrefs, saveUserFilterPrefs, resolveDefaultOwner } from '../helpers/filterPrefs';
+
 // --- helpers ---
+const norm = (v) => (v ?? '').toString().trim().toLowerCase();
+
 const statusToString = (val) => {
   if (val == null) return '';
   if (typeof val === 'string') return val.trim().toLowerCase();
@@ -120,6 +131,20 @@ const shortFromUUID = (id) => (id ? `#${String(id).replace(/-/g, '').slice(0, 4)
 const getOrderCode = (o) =>
   formatOrderNo(o?.order_no ?? o?.orderNumber ?? o?.number ?? o?.seq) || shortFromUUID(o?.id);
 
+// --- Invoice pill (igual criterio que sales.js) ---
+const invoiceView = (o, size = 'md') => {
+  const hasInv = !!o?.invoice;
+  const sent = !!o?.invoiceSent;
+  const label = hasInv ? (sent ? 'Facturada' : 'No facturada') : 'Sin factura';
+  const color = hasInv
+    ? sent
+      ? 'bg-orange-50 text-orange-700 ring-orange-200'
+      : 'bg-violet-50 text-violet-700 ring-violet-200'
+    : 'bg-gray-50 text-gray-500 ring-gray-200';
+  const sizing = size === 'sm' ? 'px-2 py-0.5 text-[11px]' : 'px-2.5 py-1 text-xs';
+  return { label, cls: `inline-flex items-center rounded-full ring-1 font-medium ${color} ${sizing}` };
+};
+
 export default function Orders() {
   const router = useRouter();
   const [orders, setOrders] = useState([]);
@@ -137,6 +162,105 @@ export default function Orders() {
   const [quickRange, setQuickRange] = useState('today'); // 'today' | 'week' | 'month' | 'range'
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
+
+  // 🔹 filtros: cartera y repartidor
+  const [ownerFilter, setOwnerFilter] = useState('all'); // 'all' | 'rucapellan' | 'cecil'
+  const [courierFilter, setCourierFilter] = useState('all'); // 'all' | <courierId>
+
+  // Usuario
+  const me = useMemo(() => getCurrentUser?.(), []);
+
+  // 🔹 NUEVO: Persistencia de filtros (idéntico estilo a sales.js)
+  const FILTERS_KEY = 'orders.filters.v1';
+  const [savedFilters, setSavedFilters] = useState(null);
+  const [justSaved, setJustSaved] = useState(false);
+  const baselineSet = useRef(false);
+
+  // Para que el efecto de prefs no pise lo cargado desde storage
+  const loadedFromStorageRef = useRef(false);
+
+  // Efecto 1: cargar filtros guardados de localStorage (si existen)
+  useEffect(() => {
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem(FILTERS_KEY) : null;
+      if (raw) {
+        const f = JSON.parse(raw);
+        if (f && typeof f === 'object') {
+          if (typeof f.searchTerm === 'string') setSearchTerm(f.searchTerm);
+          if (f.statusFilter) setStatusFilter(f.statusFilter);
+          if (f.quickRange) setQuickRange(f.quickRange);
+          if (f.fromDate) setFromDate(f.fromDate);
+          if (f.toDate) setToDate(f.toDate);
+          if (f.ownerFilter) setOwnerFilter(f.ownerFilter);
+          if (f.courierFilter) setCourierFilter(f.courierFilter);
+          setSavedFilters({
+            searchTerm: f.searchTerm ?? '',
+            statusFilter: f.statusFilter ?? 'pendiente',
+            quickRange: f.quickRange ?? 'today',
+            fromDate: f.fromDate ?? '',
+            toDate: f.toDate ?? '',
+            ownerFilter: f.ownerFilter ?? 'all',
+            courierFilter: f.courierFilter ?? 'all',
+          });
+          baselineSet.current = true;
+          loadedFromStorageRef.current = true;
+        }
+      }
+    } catch (e) {
+      console.warn('No se pudieron cargar filtros guardados en Orders', e);
+    }
+  }, []);
+
+  // Efecto 2: aplicar owner por preferencias (solo si NO vino de storage)
+  useEffect(() => {
+    if (loadedFromStorageRef.current) return;
+    const prefs = loadUserFilterPrefs(me?.email || 'anon');
+    const defOwner = resolveDefaultOwner(me, prefs, 'orders');
+    setOwnerFilter(defOwner);
+  }, [me]);
+
+  const currentFilters = useMemo(() => ({
+    searchTerm,
+    statusFilter,
+    quickRange,
+    fromDate,
+    toDate,
+    ownerFilter,
+    courierFilter,
+  }), [searchTerm, statusFilter, quickRange, fromDate, toDate, ownerFilter, courierFilter]);
+
+  // Crear baseline cuando ya tengamos fechas si aún no se creó
+  useEffect(() => {
+    if (baselineSet.current) return;
+    if (!fromDate || !toDate) return;
+    setSavedFilters({ ...currentFilters });
+    baselineSet.current = true;
+  }, [fromDate, toDate, currentFilters]);
+
+  const isDirty = useMemo(() => {
+    if (!savedFilters) return true;
+    try {
+      return JSON.stringify(savedFilters) !== JSON.stringify(currentFilters);
+    } catch {
+      return true;
+    }
+  }, [savedFilters, currentFilters]);
+
+  const saveFilters = useCallback(() => {
+    try {
+      localStorage.setItem(FILTERS_KEY, JSON.stringify(currentFilters));
+      setSavedFilters(currentFilters);
+      // además, persistimos owner en las preferencias de usuario (compat)
+      const prefs = loadUserFilterPrefs(me?.email || 'anon');
+      const next = { ...prefs, orders: { ...(prefs?.orders || {}), owner: currentFilters.ownerFilter } };
+      saveUserFilterPrefs(me?.email || 'anon', next);
+
+      setJustSaved(true);
+      setTimeout(() => setJustSaved(false), 1200);
+    } catch (e) {
+      alert('No se pudieron guardar los filtros.');
+    }
+  }, [currentFilters, me]);
 
   // Menús desktop
   const [openMenuId, setOpenMenuId] = useState(null);       // ⋯ acciones
@@ -287,8 +411,22 @@ export default function Orders() {
       return statusToString(o.status) === statusFilter;
     };
 
-    return orders.filter((o) => inDateRange(o) && bySearch(o) && byStatus(o));
-  }, [orders, debounced, clientMap, statusFilter, courierName, fromDate, toDate]);
+    // 🔹 filtro cartera
+    const byOwner = (o) => {
+      if (ownerFilter === 'all') return true;
+      const c = clientMap.get(o.clientId);
+      const owner = norm(c?.clientOwner || c?.client_owner || o.clientOwner);
+      return owner === ownerFilter;
+    };
+
+    // 🔹 filtro repartidor
+    const byCourier = (o) => {
+      if (courierFilter === 'all') return true;
+      return String(o.deliveredBy || '') === String(courierFilter);
+    };
+
+    return orders.filter((o) => inDateRange(o) && bySearch(o) && byStatus(o) && byOwner(o) && byCourier(o));
+  }, [orders, debounced, clientMap, statusFilter, courierName, fromDate, toDate, ownerFilter, courierFilter]);
 
   const stop = (e) => e.stopPropagation();
 
@@ -430,9 +568,9 @@ export default function Orders() {
           </div>
         </div>
 
-        {/* Fila 2: Estado + Rápidos + Fechas (misma línea en desktop) */}
+        {/* Fila 2: Estado + Rápidos + Fechas + Cartera/Repartidor + Guardar (como sales.js) */}
         <div className="mt-2 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-end">
-          {/* Estado: full en móvil, compacto en desktop */}
+          {/* Estado */}
           <div className="col-span-2 sm:mr-3 w-full sm:w-auto">
             <div className="rounded-lg bg-gray-100 p-1 shadow-inner w-full sm:w-auto">
               <div className="grid grid-cols-3 gap-1 w-full sm:w-auto sm:flex">
@@ -461,7 +599,7 @@ export default function Orders() {
             </div>
           </div>
 
-          {/* Rápidos (Hoy / Semana / Mes / Rango con ícono) */}
+          {/* Rápidos */}
           <div className="col-span-2 sm:mr-3">
             <div className="inline-flex w-full sm:w-auto rounded-lg border border-gray-300 overflow-hidden">
               <button
@@ -496,7 +634,7 @@ export default function Orders() {
             </div>
           </div>
 
-          {/* Fechas (misma línea) */}
+          {/* Fechas */}
           <div className="sm:mr-3">
             <input
               type="date"
@@ -512,6 +650,58 @@ export default function Orders() {
               value={toDate || ''}
               onChange={(e) => { setQuickRange('range'); setToDate(e.target.value || ''); }}
             />
+          </div>
+
+          {/* Cartera */}
+          <div className="col-span-1 sm:mr-3 sm:col-span-1 flex items-center gap-2">
+            <UsersIcon size={16} className="text-gray-500 hidden sm:inline" />
+            <select
+              className="border border-gray-300 rounded-lg px-2 py-2 text-sm bg-white w-full sm:w-[140px]"
+              value={ownerFilter}
+              onChange={(e) => setOwnerFilter(e.target.value)}
+              title="Cartera"
+            >
+              <option value="all">Todos</option>
+              <option value="rucapellan">Rucapellan</option>
+              <option value="cecil">Cecil</option>
+            </select>
+          </div>
+
+          {/* Repartidor */}
+          <div className="col-span-1 sm:mr-3 sm:col-span-1 flex items-center gap-2">
+            <Truck size={16} className="text-gray-500 hidden sm:inline" />
+            <select
+              className="border border-gray-300 rounded-lg px-2 py-2 text-sm bg-white w-full sm:w-[180px]"
+              value={courierFilter}
+              onChange={(e) => setCourierFilter(e.target.value)}
+              title="Repartidor"
+            >
+              <option value="all">Todos</option>
+              {couriers.map((u) => (
+                <option key={u.id} value={String(u.id)}>{u.name || u.email || 'Repartidor'}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Botón Guardar filtros (como sales.js) */}
+          <div className="col-span-2 sm:ml-auto sm:mr-0 flex items-center justify-end w-full">
+            <div className="inline-flex items-center gap-2">
+              {justSaved && (
+                <span className="inline-flex items-center gap-1 text-emerald-700 text-sm">
+                  <Check size={16} /> Guardado
+                </span>
+              )}
+              {isDirty && (
+                <button
+                  type="button"
+                  onClick={saveFilters}
+                  title="Guardar filtros por defecto"
+                  className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white hover:bg-gray-50"
+                >
+                  <Save size={16} /> Guardar
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -532,6 +722,7 @@ export default function Orders() {
             const delivered = statusToString(o.status) === 'entregado';
             const dx = swipeX[o.id] || 0;
             const orderCode = getOrderCode(o);
+            const { label: invLabel, cls: invCls } = invoiceView(o, 'sm');
 
             const bgSwipe =
               dx < -100 ? 'bg-emerald-50 border-emerald-200' : delivered ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-100';
@@ -565,7 +756,7 @@ export default function Orders() {
                   <Pencil size={16} />
                 </button>
 
-                {/* Local (negrita) + Cliente (chico) con acceso a cuenta */}
+                {/* Local + Cliente */}
                 <div className="pr-20">
                   <h3 className="text-base font-semibold text-coffee">{o.clientLocal || '—'}</h3>
                   <div className="mt-0.5 flex items-center gap-2 text-sm text-gray-700">
@@ -584,7 +775,7 @@ export default function Orders() {
                   </div>
                 </div>
 
-                {/* Dirección + GPS (móvil) */}
+                {/* Dirección + GPS */}
                 <div className="mt-2 flex items-start gap-2">
                   <p className="text-sm text-coffee flex-1">
                     <span className="font-medium text-coffee">Dirección: </span>
@@ -616,7 +807,7 @@ export default function Orders() {
                   </div>
                 </div>
 
-                {/* Repartidor (selector) */}
+                {/* Repartidor */}
                 <div className="mt-2">
                   <label className="block text-xs text-gray-600 mb-1">Repartidor</label>
                   <select
@@ -648,16 +839,19 @@ export default function Orders() {
                   </ul>
                 </div>
 
-                {/* Pago + Total */}
+                {/* Pago + Factura + Total */}
                 <div className="mt-3 flex items-center justify-between">
-                  <button
-                    type="button"
-                    className="active:scale-95 transition"
-                    onClick={() => updatePayment(o.id, nextPayment(o.paymentMethod))}
-                    title="Cambiar método de pago"
-                  >
-                    <PaymentBadge value={o.paymentMethod} />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="active:scale-95 transition"
+                      onClick={() => updatePayment(o.id, nextPayment(o.paymentMethod))}
+                      title="Cambiar método de pago"
+                    >
+                      <PaymentBadge value={o.paymentMethod} />
+                    </button>
+                    <span className={invCls} title="Estado de factura">{invLabel}</span>
+                  </div>
 
                   <div className="text-right text-base font-semibold text-coffee">
                     {CLP.format(Number(o.total) || 0)}
@@ -674,7 +868,7 @@ export default function Orders() {
         <div className="hidden sm:block">
           <div className="rounded-xl border border-gray-200 shadow-sm">
             <div className="overflow-x-auto">
-              <table className="min-w-[1240px] w-full">
+              <table className="min-w-[1320px] w-full">
                 <thead className="bg-gray-50">
                   <tr className="text-left">
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">N°</th>
@@ -684,6 +878,8 @@ export default function Orders() {
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Entrega</th>
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Estado</th>
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Pago</th>
+                    {/* 🔹 Nueva columna Factura (después de Pago) */}
+                    <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Factura</th>
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Repartidor</th>
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-center">Ítems</th>
                     <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-right">Total</th>
@@ -699,6 +895,7 @@ export default function Orders() {
                     const longAddr = isLong(addr);
                     const longLocal = isLong(o.clientLocal);
                     const orderCode = getOrderCode(o);
+                    const { label: invLabel, cls: invCls } = invoiceView(o);
 
                     return (
                       <React.Fragment key={o.id}>
@@ -838,6 +1035,11 @@ export default function Orders() {
                             )}
                           </td>
 
+                          {/* 🔹 Factura (solo visual en Orders) */}
+                          <td className="px-6 py-3 text-sm whitespace-nowrap">
+                            <span className={invCls} title="Estado de factura">{invLabel}</span>
+                          </td>
+
                           {/* Repartidor editable */}
                           <td className="px-6 py-3 text-sm relative" onClick={stop}>
                             <button
@@ -925,7 +1127,7 @@ export default function Orders() {
 
                         {/* Detalle productos */}
                         <tr className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
-                          <td colSpan={11} className="px-6 pb-4">
+                          <td colSpan={12} className="px-6 pb-4">
                             <div className="mt-1 rounded-lg border border-indigo-200 bg-indigo-50 p-4">
                               <h4 className="text-sm font-semibold text-coffee mb-2">Detalle de productos</h4>
                               <div className="overflow-x-auto">

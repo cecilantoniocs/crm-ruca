@@ -30,7 +30,8 @@ const itemSchema = z.object({
   product_id: z.union([z.string(), z.number()]),
   name: z.string().min(1),
   sku: z.string().min(1),
-  image_url: z.string().url().optional().nullable(),
+  // relajado: permite '' además de URL
+  image_url: z.union([z.string().url(), z.literal('')]).optional().nullable(),
   qty: z.union([z.number(), z.string()]).transform(v => {
     const n = Number(v); if (!Number.isInteger(n) || n <= 0) throw new Error('qty inválido'); return n;
   }),
@@ -56,7 +57,6 @@ const postBodySchema = z.object({
     if (!DATE_RE.test(s)) throw new Error('delivery_date debe ser YYYY-MM-DD');
     return s;
   }),
-  // aceptamos cualquier input y lo normalizamos a null | 'efectivo' | 'transferencia' | 'cheque'
   payment_method: z.any().transform(normPM).optional().nullable(),
   invoice: z.boolean().optional().nullable(),
   invoice_sent: z.boolean().optional().nullable(),
@@ -103,11 +103,12 @@ const toCamel = (o) => ({
 
 export default async function handler(req, res) {
   const user = getReqUser(req);
+  if (!user) return res.status(401).json({ error: 'No autenticado' });
 
   try {
     // --------- LISTAR (GET) ---------
     if (req.method === 'GET') {
-      requirePerm(user, 'orders.read');
+      try { requirePerm(user, 'orders.read'); } catch { return res.status(403).json({ error: 'Sin permiso: orders.read' }); }
 
       const parsed = getQuerySchema.safeParse({
         q: (req.query.q ?? '').toString().trim() || null,
@@ -121,55 +122,83 @@ export default async function handler(req, res) {
 
       const { q, status, from, to, sellerId, courierId } = parsed.data;
 
-      let query = supabaseServer
-        .from('orders')
-        .select(`
-          id, client_id, client_name, client_local, seller_id, delivered_by,
-          status, total, delivery_date, delivered_at, payment_method,
-          invoice, invoice_sent, paid, created_at, updated_at,
-          order_items ( id, product_id, name, sku, image_url, qty, price, subtotal )
-        `)
-        .order('created_at', { ascending: false });
+      const baseCols = `
+        id, client_id, client_name, client_local, seller_id, delivered_by,
+        status, total, delivery_date, delivered_at, payment_method,
+        invoice, invoice_sent, paid, created_at, updated_at
+      `;
+      const colsWithItems = `
+        ${baseCols},
+        order_items ( id, product_id, name, sku, image_url, qty, price, subtotal )
+      `;
 
-      if (q) {
-        const s = `%${q}%`;
-        query = query.or(`client_name.ilike.${s},client_local.ilike.${s}`);
+      const buildQuery = (cols) => {
+        let qy = supabaseServer.from('orders').select(cols).order('created_at', { ascending: false });
+        if (q) {
+          const s = `%${q}%`;
+          qy = qy.or(`client_name.ilike.${s},client_local.ilike.${s}`);
+        }
+        if (status) qy = qy.eq('status', status);
+        if (sellerId) qy = qy.eq('seller_id', sellerId);
+        if (courierId) qy = qy.eq('delivered_by', courierId);
+        if (from) qy = qy.gte('created_at', startOfDayISO(from));
+        if (to)   qy = qy.lt('created_at', nextDayISO(to));
+        return qy;
+      };
+
+      // intento con items
+      let { data, error } = await buildQuery(colsWithItems);
+      // fallback sin items si falla la relación
+      if (error) {
+        console.warn('[orders] fallback sin order_items por error:', error?.message || error);
+        const retry = await buildQuery(baseCols);
+        data = retry.data;
+        error = retry.error;
       }
-      if (status) query = query.eq('status', status);
-      if (sellerId) query = query.eq('seller_id', sellerId);
-      if (courierId) query = query.eq('delivered_by', courierId);
-
-      // rango por created_at (ajusta a delivered_at si lo prefieres)
-      if (from) query = query.gte('created_at', startOfDayISO(from));
-      if (to)   query = query.lt('created_at', nextDayISO(to));
-
-      const { data, error } = await query;
       if (error) throw error;
 
-      const rows = (data || []).map(toCamel);
+      const rows = (data || []).map((o) => {
+        const dto = toCamel({ ...o, order_items: o.order_items || [] });
+        return dto;
+      });
 
       // ---- SUMAS DE PAGOS (amountPaid) Y BALANCE ----
       if (rows.length > 0) {
-        const ids = rows.map(r => r.id);
-        const { data: payItems, error: piErr } = await supabaseServer
-          .from('payment_items')
-          .select('order_id, amount')
-          .in('order_id', ids);
+        try {
+          const ids = rows.map(r => r.id);
+          const { data: payItems, error: piErr } = await supabaseServer
+            .from('payment_items')
+            .select('order_id, amount')
+            .in('order_id', ids);
 
-        if (piErr) throw piErr;
-
-        const sumByOrder = new Map();
-        for (const pi of (payItems || [])) {
-          const k = pi.order_id;
-          const prev = sumByOrder.get(k) || 0;
-          sumByOrder.set(k, prev + (Number(pi.amount) || 0));
-        }
-
-        for (const r of rows) {
-          const paid = sumByOrder.get(r.id) || 0;
-          const total = Number(r.total) || 0;
-          r.amountPaid = paid;
-          r.balance = Math.max(0, total - paid);
+          if (!piErr && payItems) {
+            const sumByOrder = new Map();
+            for (const pi of (payItems || [])) {
+              const k = pi.order_id;
+              const prev = sumByOrder.get(k) || 0;
+              sumByOrder.set(k, prev + (Number(pi.amount) || 0));
+            }
+            for (const r of rows) {
+              const paid = sumByOrder.get(r.id) || 0;
+              const total = Number(r.total) || 0;
+              r.amountPaid = paid;
+              r.balance = Math.max(0, total - paid);
+            }
+          } else {
+            // si falla payment_items, no botar todo
+            for (const r of rows) {
+              const total = Number(r.total) || 0;
+              r.amountPaid = 0;
+              r.balance = total;
+            }
+          }
+        } catch (e) {
+          console.warn('[orders] payment_items no disponible, se asume 0 pagado');
+          for (const r of rows) {
+            const total = Number(r.total) || 0;
+            r.amountPaid = 0;
+            r.balance = total;
+          }
         }
       }
 
@@ -178,7 +207,7 @@ export default async function handler(req, res) {
 
     // --------- CREAR (POST) ---------
     if (req.method === 'POST') {
-      requirePerm(user, 'orders.create');
+      try { requirePerm(user, 'orders.create'); } catch { return res.status(403).json({ error: 'Sin permiso: orders.create' }); }
 
       const body = postBodySchema.parse(req.body || {});
 
@@ -224,45 +253,56 @@ export default async function handler(req, res) {
         .from('order_items')
         .insert(itemsToInsert);
       if (errItems) {
-        // rollback lógico
         await supabaseServer.from('orders').delete().eq('id', orderId);
         throw errItems;
       }
 
       // 3) devolver orden completa + totales de pago
-      const { data: full, error: errSelect } = await supabaseServer
-        .from('orders')
-        .select(`
-          id, client_id, client_name, client_local, seller_id, delivered_by,
-          status, total, delivery_date, delivered_at, payment_method,
-          invoice, invoice_sent, paid, created_at, updated_at,
-          order_items ( id, product_id, name, sku, image_url, qty, price, subtotal )
-        `)
-        .eq('id', orderId)
-        .maybeSingle();
-      if (errSelect) throw errSelect;
+      const baseCols = `
+        id, client_id, client_name, client_local, seller_id, delivered_by,
+        status, total, delivery_date, delivered_at, payment_method,
+        invoice, invoice_sent, paid, created_at, updated_at
+      `;
+      const colsWithItems = `
+        ${baseCols},
+        order_items ( id, product_id, name, sku, image_url, qty, price, subtotal )
+      `;
 
-      const dto = toCamel(full);
+      let sel = await supabaseServer.from('orders').select(colsWithItems).eq('id', orderId).maybeSingle();
+      if (sel.error) {
+        console.warn('[orders POST] fallback sin order_items por error:', sel.error?.message || sel.error);
+        sel = await supabaseServer.from('orders').select(baseCols).eq('id', orderId).maybeSingle();
+      }
+      if (sel.error) throw sel.error;
 
-      // suma pagos (recién creada normalmente 0, pero lo dejamos consistente)
-      const { data: payItems, error: piErr } = await supabaseServer
-        .from('payment_items')
-        .select('order_id, amount')
-        .eq('order_id', orderId);
+      const dto = toCamel({ ...(sel.data || {}), order_items: sel.data?.order_items || [] });
 
-      if (piErr) throw piErr;
+      // suma pagos (si falla, asumir 0)
+      try {
+        const { data: payItems, error: piErr } = await supabaseServer
+          .from('payment_items')
+          .select('order_id, amount')
+          .eq('order_id', orderId);
 
-      const paid = (payItems || []).reduce((a, b) => a + (Number(b.amount) || 0), 0);
-      dto.amountPaid = paid;
-      dto.balance = Math.max(0, (Number(dto.total) || 0) - paid);
+        const paid = !piErr && payItems
+          ? (payItems || []).reduce((a, b) => a + (Number(b.amount) || 0), 0)
+          : 0;
+
+        dto.amountPaid = paid;
+        dto.balance = Math.max(0, (Number(dto.total) || 0) - paid);
+      } catch {
+        dto.amountPaid = 0;
+        dto.balance = Math.max(0, Number(dto.total) || 0);
+      }
 
       return res.status(201).json(dto);
     }
 
     return res.status(405).end();
   } catch (e) {
-    const status = e.status || 500;
-    const message = e.msg || e.message || 'Error';
+    const isZod = e?.name === 'ZodError' || /Zod/i.test(e?.message || '');
+    const status = isZod ? 400 : (e?.status || 500);
+    const message = e?.msg || e?.message || 'Error';
     console.error('API /orders', e);
     return res.status(status).json({ error: message });
   }

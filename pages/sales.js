@@ -2,8 +2,9 @@
 // Rework: método de pago con toggle, header móvil (local arriba, persona abajo + ícono cuenta),
 // KPIs avanzados detrás del permiso sales.kpis.view y "Total" -> "Ingresos".
 // Fixes: gating por permisos + payload camelCase+snake_case para parches robustos.
+// + Filtros persistentes con botón de disquete (localStorage sales.filters.v1)
 
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import Layout from '../components/Layout';
 import { useRouter } from 'next/router';
 import axiosClient from '../config/axios';
@@ -16,6 +17,8 @@ import {
   Users as UsersIcon,
   ExternalLink,
   CreditCard,
+  Save,
+  Check,
 } from 'lucide-react';
 
 import PullToRefreshHeader from '../components/PullToRefreshHeader';
@@ -195,6 +198,88 @@ const SalesPage = () => {
   const [openInvoiceId, setOpenInvoiceId] = useState(null);
 
   const { headerProps } = usePullToRefreshWindow({ onRefresh: () => refetch(), threshold: 60 });
+
+  // ====== Persistencia de filtros (disquete) ======
+  const FILTERS_KEY = 'sales.filters.v1';
+  const currentFilters = useMemo(() => ({
+    searchTerm,
+    quickRange,
+    fromDate,
+    toDate,
+    ownerFilter,
+    courierFilter,
+    paymentFilter,
+    invoiceFilter,
+    paidFilter,
+  }), [searchTerm, quickRange, fromDate, toDate, ownerFilter, courierFilter, paymentFilter, invoiceFilter, paidFilter]);
+
+  const [savedFilters, setSavedFilters] = useState(null);
+  const [justSaved, setJustSaved] = useState(false);
+  const baselineSet = useRef(false);
+
+  // Cargar filtros guardados al montar (si existen)
+  useEffect(() => {
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem(FILTERS_KEY) : null;
+      if (!raw) return;
+      const f = JSON.parse(raw);
+      if (f && typeof f === 'object') {
+        if (f.searchTerm != null) setSearchTerm(String(f.searchTerm));
+        if (f.quickRange) setQuickRange(f.quickRange);
+        if (f.fromDate) setFromDate(f.fromDate);
+        if (f.toDate) setToDate(f.toDate);
+        if (f.ownerFilter) setOwnerFilter(f.ownerFilter);
+        if (f.courierFilter) setCourierFilter(f.courierFilter);
+        if (f.paymentFilter) setPaymentFilter(f.paymentFilter);
+        if (f.invoiceFilter) setInvoiceFilter(f.invoiceFilter);
+        if (f.paidFilter) setPaidFilter(f.paidFilter);
+        setSavedFilters({
+          searchTerm: f.searchTerm ?? '',
+          quickRange: f.quickRange ?? 'month',
+          fromDate: f.fromDate ?? '',
+          toDate: f.toDate ?? '',
+          ownerFilter: f.ownerFilter ?? 'all',
+          courierFilter: f.courierFilter ?? 'all',
+          paymentFilter: f.paymentFilter ?? 'all',
+          invoiceFilter: f.invoiceFilter ?? 'all',
+          paidFilter: f.paidFilter ?? 'all',
+        });
+        baselineSet.current = true; // ya hay baseline desde storage
+      }
+    } catch (e) {
+      console.warn('No se pudieron cargar filtros guardados', e);
+    }
+  }, []);
+
+  // Si no hay baseline guardado, lo creamos cuando ya existan fechas (quickRange aplicado)
+  useEffect(() => {
+    if (baselineSet.current) return;
+    if (!fromDate || !toDate) return;
+    setSavedFilters({ ...currentFilters });
+    baselineSet.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromDate, toDate]);
+
+  // Muestra disquete si no hay baseline o si hay diferencias
+  const isDirty = useMemo(() => {
+    if (!savedFilters) return true;
+    try {
+      return JSON.stringify(savedFilters) !== JSON.stringify(currentFilters);
+    } catch {
+      return true;
+    }
+  }, [savedFilters, currentFilters]);
+
+  const saveFilters = useCallback(() => {
+    try {
+      localStorage.setItem(FILTERS_KEY, JSON.stringify(currentFilters));
+      setSavedFilters(currentFilters);
+      setJustSaved(true);
+      setTimeout(() => setJustSaved(false), 1200);
+    } catch (e) {
+      alert('No se pudieron guardar los filtros.');
+    }
+  }, [currentFilters]);
 
   // --- fetch server-side desde /api/sales ---
   const refetch = useCallback(async () => {
@@ -420,38 +505,37 @@ const SalesPage = () => {
     setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, ...patch } : o)));
 
   // Toggle pagado/no pagado
-// ✅ Repara borrado de abonos al pasar a "No pagado"
-const togglePaid = async (id) => {
-  if (!canMarkPaid) return;
-  const prev = orders.find((o) => o.id === id);
-  if (!prev) return;
+  // ✅ Repara borrado de abonos al pasar a "No pagado"
+  const togglePaid = async (id) => {
+    if (!canMarkPaid) return;
+    const prev = orders.find((o) => o.id === id);
+    if (!prev) return;
 
-  const newPaid = !prev.paid;
+    const newPaid = !prev.paid;
 
-  // Optimista para KPIs
-  if (!newPaid) {
-    applyLocal(id, { paid: false, paidSum: 0, remaining: Number(prev.total) || 0 });
-  } else {
-    applyLocal(id, { paid: true, remaining: 0 });
-  }
+    // Optimista para KPIs
+    if (!newPaid) {
+      applyLocal(id, { paid: false, paidSum: 0, remaining: Number(prev.total) || 0 });
+    } else {
+      applyLocal(id, { paid: true, remaining: 0 });
+    }
 
-  try {
-    const payload = newPaid
-      // Al marcar pagado: crea abono automático con el método actual
-      ? withSnake({ paid: true, paymentMethod: paymentToString(prev.paymentMethod) }, { action: 'mark_paid' })
-      // Al marcar NO pagado: borra todos los abonos (flag que espera tu API)
-      : withSnake({ paid: false }, { wipePayments: true, action: 'mark_paid' });
+    try {
+      const payload = newPaid
+        // Al marcar pagado: crea abono automático con el método actual
+        ? withSnake({ paid: true, paymentMethod: paymentToString(prev.paymentMethod) }, { action: 'mark_paid' })
+        // Al marcar NO pagado: borra todos los abonos (flag que espera tu API)
+        : withSnake({ paid: false }, { wipePayments: true, action: 'mark_paid' });
 
-    await axiosClient.patch(`orders/${id}`, payload);
-    await refreshOneFromView(id);
-  } catch (e) {
-    console.error(e);
-    // Revertir si falla
-    applyLocal(id, { paid: prev.paid, paidSum: prev.paidSum, remaining: prev.remaining });
-    alert('No se pudo actualizar "Pago".');
-  }
-};
-
+      await axiosClient.patch(`orders/${id}`, payload);
+      await refreshOneFromView(id);
+    } catch (e) {
+      console.error(e);
+      // Revertir si falla
+      applyLocal(id, { paid: prev.paid, paidSum: prev.paidSum, remaining: prev.remaining });
+      alert('No se pudo actualizar "Pago".');
+    }
+  };
 
   // Toggle cíclico método de pago
   const cyclePayment = async (id) => {
@@ -706,7 +790,7 @@ const togglePaid = async (id) => {
           </div>
 
           {/* Pago (estado) */}
-          <div className="flex items-center gap-2 sm:mr-3">
+          <div className="flex itemscenter gap-2 sm:mr-3">
             <DollarSign size={16} className="text-gray-500 hidden sm:inline" />
             <select
               className="border border-gray-300 rounded-lg px-2 py-2 text-sm bg-white w-full sm:w-[112px]"
@@ -734,6 +818,27 @@ const togglePaid = async (id) => {
               <option value="transferencia">Transferencia</option>
               <option value="cheque">Cheque</option>
             </select>
+          </div>
+
+          {/* Botón Guardar filtros (disquete) */}
+          <div className="col-span-2 sm:ml-auto sm:mr-0 flex items-center justify-end w-full">
+            <div className="inline-flex items-center gap-2">
+              {justSaved && (
+                <span className="inline-flex items-center gap-1 text-emerald-700 text-sm">
+                  <Check size={16} /> Guardado
+                </span>
+              )}
+              {isDirty && (
+                <button
+                  type="button"
+                  onClick={saveFilters}
+                  title="Guardar filtros por defecto"
+                  className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white hover:bg-gray-50"
+                >
+                  <Save size={16} /> Guardar
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>

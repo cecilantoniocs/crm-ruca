@@ -288,7 +288,10 @@ const Sidebar = ({ menuOpen = false, setMenuOpen }) => {
         <div className="pt-5">
           <div className="rounded-lg bg-[#000000] text-white text-xs px-3 py-2 font-medium shadow-sm">
             <div className="text-[11px] uppercase tracking-wide opacity-80 mb-0.5">
-              RookApp v2.0
+              RookApp v5.0
+            </div>
+                        <div className="text-[9px] uppercase tracking-wide opacity-80 mb-0.5">
+              Last Update 24-11-25
             </div>
             <div>
               Developed by <span className="font-semibold">Cecil</span> ⚡
