@@ -68,16 +68,9 @@ export default function LoginPage() {
         {/* PWA / meta mínima */}
         <meta name="mobile-web-app-capable" content="yes" />
 
-        {/* Preload del logo para que aparezca SIEMPRE a la primera */}
-        <link
-          rel="preload"
-          as="image"
-          href={LOGO_SRC}
-          // type opcional si quieres especificar mime: type="image/png"
-          fetchpriority="high"
-        />
+        {/* Preload del logo */}
+        <link rel="preload" as="image" href={LOGO_SRC} fetchpriority="high" />
 
-        {/* Favicon opcional si lo tienes */}
         <link rel="icon" href="/favicon.ico" />
       </Head>
 
@@ -102,7 +95,7 @@ export default function LoginPage() {
                     height={200}
                     loading="eager"
                     decoding="sync"
-                    fetchPriority="high"
+                    fetchpriority="high"
                     className="h-40 w-40 object-contain"
                   />
                 ) : (
@@ -111,18 +104,12 @@ export default function LoginPage() {
                     alt="Rucapellán"
                     width={200}
                     height={200}
-                    // Evita el lazy en el logo de marca
                     priority
-                    // Carga sincrónica para que no parpadee
                     decoding="sync"
-                    // Prop válida en React 18 / Next 15 (camelCase)
                     fetchPriority="high"
                     className="h-40 w-40 object-contain"
-                    // Si hubiera cualquier problema, forzamos fallback a <img>
+                    unoptimized
                     onError={() => setUseFallbackImg(true)}
-                    // En dev a veces las optimizaciones causan parpadeos;
-                    // si prefieres, puedes activar unoptimized:
-                    // unoptimized
                   />
                 )}
               </div>
