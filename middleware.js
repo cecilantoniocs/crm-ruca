@@ -7,11 +7,13 @@ const PUBLIC_API_PREFIXES = [
   '/api/auth/login',
   '/api/auth/me',
   '/api/health',
-  '/api/debug',        // /api/debug/supabase, etc.
+  '/api/debug', // /api/debug/supabase, etc.
 ];
 
 // Páginas públicas
-const PUBLIC_PAGES = new Set(['/login']); // agrega '/' si tu home es público
+const PUBLIC_PAGES = new Set([
+  '/login', // agrega '/' si tu home es público
+]);
 
 async function verifyToken(token) {
   const secret = process.env.JWT_SECRET || '';
@@ -33,19 +35,33 @@ function getTokenFromReq(req) {
   return c1 || c2 || b || null;
 }
 
-export async function middleware(req) {
-  const { pathname } = req.nextUrl;
-
-  // Omite estáticos y assets
+function isStaticPath(pathname) {
+  // Rutas y extensiones que NO deben pasar por middleware (evita redirects de estáticos)
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon') ||
     pathname.startsWith('/icons') ||
     pathname.startsWith('/images') ||
+    pathname.startsWith('/brand/') || // tus logos y assets
+    pathname === '/sw.js' ||
     pathname === '/site.webmanifest' ||
+    pathname === '/manifest.webmanifest' ||
+    pathname === '/manifest.json' ||
     pathname === '/robots.txt' ||
-    pathname === '/sitemap.xml'
+    pathname === '/sitemap.xml' ||
+    /^\/(icon|apple-touch-icon|android-chrome)-.*\.png$/i.test(pathname) ||
+    /\.(png|jpg|jpeg|svg|gif|ico|webp|avif|txt|xml|json|webmanifest)$/i.test(pathname)
   ) {
+    return true;
+  }
+  return false;
+}
+
+export async function middleware(req) {
+  const { pathname } = req.nextUrl;
+
+  // Bypass total para estáticos / PWA
+  if (isStaticPath(pathname)) {
     return NextResponse.next();
   }
 
@@ -70,12 +86,13 @@ export async function middleware(req) {
   const token = getTokenFromReq(req);
 
   if (!token) {
-    // Si es API, responde 401; si es página, redirige a /login
+    // Si es API, responde 401; si es página, redirige a /login preservando "next"
     if (pathname.startsWith('/api/')) {
       return NextResponse.json({ error: 'UNAUTHENTICATED' }, { status: 401 });
     }
     const url = req.nextUrl.clone();
     url.pathname = '/login';
+    // preserva query del destino original (solo path para evitar open redirect)
     url.searchParams.set('next', pathname);
     return NextResponse.redirect(url);
   }
@@ -94,9 +111,12 @@ export async function middleware(req) {
   }
 }
 
-// Evita que el middleware se aplique a assets internos
+// Mantén auth en APIs, pero excluye estáticos del resto del sitio
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|site.webmanifest|icons|images|robots.txt|sitemap.xml).*)',
+    // Protege APIs (el código interno decidirá si son públicas o no)
+    '/api/:path*',
+    // Protege páginas, excluyendo explícitamente estáticos y PWA
+    '/((?!_next/|favicon.ico|favicon/|icons/|images/|brand/|sw\\.js|site\\.webmanifest|manifest\\.webmanifest|manifest\\.json|robots\\.txt|sitemap\\.xml|.*\\.(?:png|jpg|jpeg|svg|gif|ico|webp|avif|txt|xml|json|webmanifest)$).*)',
   ],
 };
