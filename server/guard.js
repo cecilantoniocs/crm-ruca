@@ -88,6 +88,14 @@ export function getReqUser(req) {
       perms = DEFAULT_NONADMIN_PERMS;
     }
 
+    // carteras: array de carteras asignadas al usuario
+    let carteras = Array.isArray(payload.carteras) ? payload.carteras : [];
+    if (isAdmin) {
+      carteras = ['rucapellan', 'cecil'];
+    } else if (carteras.length === 0 && partnerTag) {
+      carteras = [partnerTag]; // fallback legacy
+    }
+
     const user = {
       id: payload.id,
       email: payload.email ?? null,
@@ -100,6 +108,8 @@ export function getReqUser(req) {
 
       partner_tag: partnerTag,
       partnerTag: partnerTag,
+
+      carteras,
 
       can_deliver: !!(payload.can_deliver ?? payload.canDeliver),
     };

@@ -1,6 +1,7 @@
 // pages/neworder.js
 import React, { useEffect, useMemo, useState } from 'react';
 import Layout from '../components/Layout';
+import DateInput from '../components/DateInput';
 import { useRouter } from 'next/router';
 import { v4 as uuidv4 } from 'uuid';
 import axiosClient from '../config/axios';
@@ -453,8 +454,7 @@ const NewOrder = () => {
                 <span className="absolute left-3 top-2.5 text-gray-400">
                   <Calendar size={16} />
                 </span>
-                <input
-                  type="date"
+                <DateInput
                   className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm"
                   value={deliveryDate}
                   onChange={(e) => setDeliveryDate(e.target.value)}

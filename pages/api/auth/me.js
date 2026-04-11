@@ -57,7 +57,7 @@ export default async function handler(req, res) {
     try {
       const { data, error } = await supabaseServer
         .from('users_app')
-        .select('id,email,name,role,is_admin,permissions,partner_tag,can_deliver')
+        .select('id,email,name,role,is_admin,permissions,partner_tag,can_deliver,carteras')
         .eq('id', u.id)
         .maybeSingle();
       if (error) throw error;
@@ -78,21 +78,30 @@ export default async function handler(req, res) {
     const rawTag = (row?.partner_tag ?? u.partner_tag ?? u.partnerTag ?? '').toString().trim();
     const tagLower = rawTag.toLowerCase();
 
+    // carteras: siempre desde BD si está disponible
+    let carteras = Array.isArray(row?.carteras) ? row.carteras : (Array.isArray(u.carteras) ? u.carteras : []);
+    if (isAdmin) {
+      carteras = ['rucapellan', 'cecil'];
+    } else if (carteras.length === 0 && rawTag) {
+      carteras = [rawTag];
+    }
+
     // 4) User consolidado (exponemos ambos nombres de campos por compatibilidad)
     const safeUser = {
       id: u.id,
       email,
       name,
-      role,                       // <- IMPORTANTE: ahora siempre presente
+      role,
       is_admin: isAdmin,
-      isAdmin,                    // alias
-      can_deliver: canDeliver,    // <- IMPORTANTE: ahora siempre de BD si existe
-      canDeliver,                 // alias
+      isAdmin,
+      can_deliver: canDeliver,
+      canDeliver,
       permissions,
       partner_tag: rawTag,
       partnerTag: rawTag,
       partner_tag_lower: tagLower,
       partnerTagLower: tagLower,
+      carteras,
     };
 
     return res.status(200).json({ user: safeUser });

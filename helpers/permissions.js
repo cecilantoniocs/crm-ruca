@@ -65,6 +65,12 @@ export const PERMISSIONS_SCHEMA = {
       view: 'Ver',
     },
   },
+  analytics: {
+    label: 'Analytics',
+    actions: {
+      view: 'Ver dashboard',
+    },
+  },
 };
 
 // ==============================
@@ -153,11 +159,14 @@ export const ROLE_TEMPLATES = {
     users: { view: true },
     clientAccount: { read: true, charge: true },
     tracking: { view: true }, // <- puede ver Tracking
+    analytics: { view: true },
   }),
 
   produccion: mergeFalse(allFalse(), {
     products: { view: true, edit: true },
     clients: { view: true },
+    orders: { view: true },
+    sales: { view: true },
     clientAccount: { read: true },
     // tracking: { view: false }
   }),
@@ -218,6 +227,9 @@ export function tokensToPermsObject(list = []) {
     has('gps.read') ||
     has('locations:view') ||
     has('locations.read');
+
+  // analytics
+  out.analytics.view = has('analytics:view') || has('analytics.view') || has('analytics:read');
 
   // users
   out.users.view   = has('users:read') || has('users:update') || has('users:create') || has('users:delete');

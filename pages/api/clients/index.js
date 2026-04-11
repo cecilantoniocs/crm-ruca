@@ -1,9 +1,17 @@
 // /pages/api/clients/index.js
 import { supabaseServer } from '@/lib/supabaseServer';
 import { getReqUser, requirePerm } from '@/server/guard';
+import { logAudit } from '@/server/audit';
 import { z } from 'zod';
 
 const OWNERS = ['rucapellan', 'cecil'];
+
+function getUserCarteras(user) {
+  if (!user) return [];
+  if (user.is_admin || user.isAdmin) return OWNERS;
+  const c = Array.isArray(user.carteras) ? user.carteras : [];
+  return c.length > 0 ? c : (user.partner_tag ? [user.partner_tag] : []);
+}
 const DB_TYPES = ['B2B', 'B2C'];
 
 const toDBClientType = (v) => {
@@ -53,8 +61,10 @@ function mapRow(c) {
     rut: c.rut,
     razon_social: c.razon_social,
     ownerId: c.owner_id,
-    clientType: c.client_type ? String(c.client_type).toLowerCase() : null, // respuesta en minúsculas
+    clientType: c.client_type ? String(c.client_type).toLowerCase() : null,
     clientOwner: c.client_owner,
+    createdAt: c.created_at ?? null,
+    updatedAt: c.updated_at ?? null,
   };
 }
 
@@ -79,12 +89,26 @@ export default async function handler(req, res) {
 
       let query = supabaseServer
         .from('clients')
-        .select('id,name,local_name,dir1,zona,ciudad,telefono,email,rut,razon_social,owner_id,client_type,client_owner')
+        .select('id,name,local_name,dir1,zona,ciudad,telefono,email,rut,razon_social,owner_id,client_type,client_owner,created_at,updated_at')
         .order('name', { ascending: true });
 
       if (ownerId) query = query.eq('owner_id', normalizeOwnerId(ownerId));
-      if (clientOwner) query = query.eq('client_owner', clientOwner);
-      if (type) query = query.eq('client_type', type.toUpperCase()); // DB en MAYÚSCULAS
+
+      // filtrar por carteras del usuario (si no es admin)
+      const userCarteras = getUserCarteras(user);
+      if (clientOwner) {
+        // si piden filtro específico, respetar solo si está en sus carteras
+        if (userCarteras.includes(clientOwner)) {
+          query = query.eq('client_owner', clientOwner);
+        } else {
+          return res.json([]); // no tiene acceso a esa cartera
+        }
+      } else if (userCarteras.length < OWNERS.length) {
+        // restringir a sus carteras automáticamente
+        query = query.in('client_owner', userCarteras);
+      }
+
+      if (type) query = query.eq('client_type', type.toUpperCase());
 
       if (q) {
         const pattern = `%${q}%`;
@@ -104,13 +128,18 @@ export default async function handler(req, res) {
       const localName = body.nombre_local ?? body.local_name ?? null;
 
       // ---------- Resolver clientOwner ----------
+      const userCarteras = getUserCarteras(user);
       let clientOwner = (body.clientOwner || '').toString().trim().toLowerCase();
       if (!clientOwner) {
-        const byTag = (user?.partner_tag || '').toString().trim().toLowerCase();
-        if (OWNERS.includes(byTag)) clientOwner = byTag;
+        // usar primera cartera del usuario como default
+        clientOwner = userCarteras[0] || '';
       }
       if (!OWNERS.includes(clientOwner)) {
         return res.status(400).json({ error: 'clientOwner es requerido (rucapellan o cecil)' });
+      }
+      // validar que el usuario tenga acceso a esa cartera
+      if (!userCarteras.includes(clientOwner)) {
+        return res.status(403).json({ error: 'Sin acceso a esa cartera' });
       }
 
       // ---------- clientType para DB (MAYÚSCULAS) ----------
@@ -143,6 +172,7 @@ export default async function handler(req, res) {
         .single();
 
       if (error) throw error;
+      await logAudit(user, { action: 'client.created', entity: 'client', entityId: data.id, description: `Cliente creado — ${data.name || ''}` });
       return res.status(201).json(mapRow(data));
     }
 

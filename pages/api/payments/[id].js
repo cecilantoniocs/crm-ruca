@@ -1,6 +1,7 @@
 // /pages/api/payments/[id].js
 import { supabaseServer } from '@/lib/supabaseServer';
 import { getReqUser, requirePerm } from '@/server/guard';
+import { logAudit } from '@/server/audit';
 import { z } from 'zod';
 
 // ---------- payment method: whitelist + normalización ----------
@@ -172,6 +173,7 @@ export default async function handler(req, res) {
         return res.status(500).json({ error: 'DB_ERROR', detail: delErr.message || delErr });
       }
 
+      await logAudit(user, { action: 'payment.deleted', entity: 'payment', entityId: id, description: 'Abono eliminado' });
       return res.status(204).end();
     }
 

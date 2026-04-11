@@ -2,6 +2,15 @@
 import { supabaseServer } from '@/lib/supabaseServer';
 import { getReqUser, requirePerm } from '@/server/guard';
 
+const ALL_OWNERS = ['rucapellan', 'cecil'];
+
+function getUserCarteras(user) {
+  if (!user) return [];
+  if (user.is_admin || user.isAdmin) return ALL_OWNERS;
+  const c = Array.isArray(user.carteras) ? user.carteras : [];
+  return c.length > 0 ? c : (user.partner_tag ? [user.partner_tag] : []);
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).end();
   const user = getReqUser(req);
@@ -57,8 +66,17 @@ export default async function handler(req, res) {
       query = query.or(`client_name.ilike.${s},client_local.ilike.${s}`);
     }
 
-    // Cartera (owner)
-    if (owner && owner !== 'all') query = query.eq('client_owner', owner);
+    // Cartera (owner): restringir por carteras del usuario
+    const userCarteras = getUserCarteras(user);
+    if (owner && owner !== 'all') {
+      if (userCarteras.includes(owner)) {
+        query = query.eq('client_owner', owner);
+      } else {
+        return res.json([]); // no tiene acceso a esa cartera
+      }
+    } else if (userCarteras.length < ALL_OWNERS.length) {
+      query = query.in('client_owner', userCarteras);
+    }
 
     // Repartidor
     if (courierId && courierId !== 'all') query = query.eq('delivered_by', courierId);

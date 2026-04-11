@@ -11,7 +11,15 @@ function looksLikeUuid(v = '') {
 }
 
 const SELECT_FIELDS =
-  'id,name,email,role,is_admin,permissions,created_at,partner_tag,can_deliver,last_seen_at';
+  'id,name,email,role,is_admin,permissions,created_at,partner_tag,can_deliver,last_seen_at,carteras';
+
+const ALL_CARTERAS = ['rucapellan', 'cecil'];
+
+function coerceCarteras(val, isAdmin = false) {
+  if (isAdmin) return ALL_CARTERAS;
+  if (Array.isArray(val)) return val.filter((v) => ALL_CARTERAS.includes(String(v)));
+  return [];
+}
 
 const ALLOWED_ROLES = new Set(['admin', 'vendedor', 'supervisor', 'repartidor', 'produccion']);
 
@@ -102,15 +110,17 @@ function mapRow(u) {
   if (!u) return null;
   const lastMs = u.last_seen_at ? new Date(u.last_seen_at).getTime() : 0;
   const online = lastMs ? (Date.now() - lastMs) <= 120_000 : false;
+  const isAdmin = !!u.is_admin;
   return {
     id: u.id,
     name: u.name,
     email: u.email,
     role: u.role || null,
-    is_admin: !!u.is_admin,
+    is_admin: isAdmin,
     partner_tag: u.partner_tag || '',
     can_deliver: !!u.can_deliver,
     permissions: Array.isArray(u.permissions) ? u.permissions : [],
+    carteras: coerceCarteras(u.carteras, isAdmin),
     created_at: u.created_at,
     last_seen_at: u.last_seen_at || null,
     online,
@@ -218,6 +228,10 @@ export default async function handler(req, res) {
       if ('partner_tag' in body || 'partnerTag' in body) {
         const rawTag = String(body.partner_tag ?? body.partnerTag ?? '').trim();
         patch.partner_tag = rawTag || null;
+      }
+      if ('carteras' in body) {
+        const isAdminVal = 'is_admin' in body ? !!(body.is_admin ?? body.isAdmin) : !!current.is_admin;
+        patch.carteras = coerceCarteras(body.carteras, isAdminVal);
       }
       if ('can_deliver' in body || 'canDeliver' in body) {
         patch.can_deliver = !!(body.can_deliver ?? body.canDeliver);

@@ -1,6 +1,7 @@
 // /pages/api/payments/index.js
 import { supabaseServer } from '@/lib/supabaseServer';
 import { getReqUser, requirePerm } from '@/server/guard';
+import { logAudit } from '@/server/audit';
 import { z } from 'zod';
 
 // ---------- mappers ----------
@@ -295,6 +296,7 @@ export default async function handler(req, res) {
         });
       }
 
+      await logAudit(user, { action: 'payment.created', entity: 'payment', entityId: created.id, description: `Abono registrado — $${amountTotal} (${method})` });
       return res.status(201).json({
         ...mapPayment(created),
         items: (insItems || []).map(mapItem),

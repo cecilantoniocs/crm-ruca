@@ -6,6 +6,7 @@
 
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import Layout from '../components/Layout';
+import DateInput from '../components/DateInput';
 import { useRouter } from 'next/router';
 import axiosClient from '../config/axios';
 import {
@@ -652,8 +653,8 @@ const SalesPage = () => {
 
       {/* Header + KPIs */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
-        <h1 className="text-3xl font-bold text-coffee-900 tracking-tight">
-          Panel de <span className="text-brand-700">Ventas</span>
+        <h1 className="text-3xl font-bold text-coffee tracking-tight">
+          Panel de <span className="text-brand-600">Ventas</span>
         </h1>
 
         {canViewSales && (
@@ -694,7 +695,7 @@ const SalesPage = () => {
       </div>
 
       {/* Filtros */}
-      <div className="mb-4">
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 mb-6">
         <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-end">
           {/* Buscador */}
           <div className="col-span-2 sm:mr-3">
@@ -724,16 +725,14 @@ const SalesPage = () => {
 
           {/* Fechas */}
           <div className="sm:mr-3">
-            <input
-              type="date"
+            <DateInput
               className="border border-gray-300 rounded-lg px-2 py-2 text-sm w-[90%] sm:w-[138px]"
               value={fromDate}
               onChange={(e) => { setQuickRange('range'); setFromDate(e.target.value); }}
             />
           </div>
           <div className="sm:mr-3">
-            <input
-              type="date"
+            <DateInput
               className="border border-gray-300 rounded-lg px-2 py-2 text-sm w-[90%] sm:w-[138px]"
               value={toDate}
               onChange={(e) => { setQuickRange('range'); setToDate(e.target.value); }}

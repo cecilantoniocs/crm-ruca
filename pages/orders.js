@@ -1,6 +1,7 @@
 // /pages/orders.js
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import Layout from '../components/Layout';
+import DateInput from '../components/DateInput';
 import { useRouter } from 'next/router';
 import axiosClient from '../config/axios';
 import {
@@ -25,7 +26,7 @@ import PullToRefreshHeader from '../components/PullToRefreshHeader';
 import usePullToRefreshWindow from '../hooks/usePullToRefreshWindow';
 
 // 🔹 NUEVO: traer usuario y helpers de preferencias (seguimos usando owner por prefs)
-import { getCurrentUser } from '../helpers/permissions';
+import { getCurrentUser, can, isAdmin } from '../helpers/permissions';
 import { loadUserFilterPrefs, saveUserFilterPrefs, resolveDefaultOwner } from '../helpers/filterPrefs';
 
 // --- helpers ---
@@ -169,6 +170,9 @@ export default function Orders() {
 
   // Usuario
   const me = useMemo(() => getCurrentUser?.(), []);
+  const canCreateOrders = useMemo(() => isAdmin(me) || can('orders.create', null, me), [me]);
+  const canEditOrders   = useMemo(() => isAdmin(me) || can('orders.edit',   null, me), [me]);
+  const canDeleteOrders = useMemo(() => isAdmin(me) || can('orders.delete', null, me), [me]);
 
   // 🔹 NUEVO: Persistencia de filtros (idéntico estilo a sales.js)
   const FILTERS_KEY = 'orders.filters.v1';
@@ -541,17 +545,19 @@ export default function Orders() {
           Gestión de <span className="text-brand-600">Pedidos</span>
         </h1>
 
-        <button
-          onClick={() => router.push('/neworder')}
-          className="mt-3 sm:mt-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-600 text-white font-medium shadow hover:bg-brand-700 active:scale-95 transition"
-        >
-          <PackagePlus size={18} />
-          Nuevo Pedido
-        </button>
+        {canCreateOrders && (
+          <button
+            onClick={() => router.push('/neworder')}
+            className="mt-3 sm:mt-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-600 text-white font-medium shadow hover:bg-brand-700 active:scale-95 transition"
+          >
+            <PackagePlus size={18} />
+            Nuevo Pedido
+          </button>
+        )}
       </div>
 
       {/* Filtros */}
-      <div className="mb-4">
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 mb-6">
         {/* Fila 1: Buscador (más ancho en desktop) */}
         <div className="grid grid-cols-2 gap-2 sm:flex sm:items-end">
           <div className="col-span-2 sm:mr-3">
@@ -636,16 +642,14 @@ export default function Orders() {
 
           {/* Fechas */}
           <div className="sm:mr-3">
-            <input
-              type="date"
+            <DateInput
               className="border border-gray-300 rounded-lg px-2 py-2 text-sm w-[90%] sm:w-[138px]"
               value={fromDate || ''}
               onChange={(e) => { setQuickRange('range'); setFromDate(e.target.value || ''); }}
             />
           </div>
           <div className="sm:mr-3">
-            <input
-              type="date"
+            <DateInput
               className="border border-gray-300 rounded-lg px-2 py-2 text-sm w-[90%] sm:w-[138px]"
               value={toDate || ''}
               onChange={(e) => { setQuickRange('range'); setToDate(e.target.value || ''); }}
@@ -746,15 +750,17 @@ export default function Orders() {
                 </div>
 
                 {/* lápiz editar */}
-                <button
-                  type="button"
-                  onClick={() => handleEdit(o.id)}
-                  className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-500 text-white hover:bg-brand-600 active:scale-95 transition"
-                  aria-label="Editar pedido"
-                  title="Editar pedido"
-                >
-                  <Pencil size={16} />
-                </button>
+                {canEditOrders && (
+                  <button
+                    type="button"
+                    onClick={() => handleEdit(o.id)}
+                    className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-500 text-white hover:bg-brand-600 active:scale-95 transition"
+                    aria-label="Editar pedido"
+                    title="Editar pedido"
+                  >
+                    <Pencil size={16} />
+                  </button>
+                )}
 
                 {/* Local + Cliente */}
                 <div className="pr-20">
@@ -1088,40 +1094,46 @@ export default function Orders() {
 
                           {/* Acciones ⋯ */}
                           <td className="px-6 py-3 text-sm">
-                            <div className="relative flex items-center justify-center" onClick={stop}>
-                              <button
-                                type="button"
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 active:scale-95 transition text-gray-600"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setOpenMenuId((v) => (v === o.id ? null : o.id));
-                                  setOpenStatusId(null);
-                                  setOpenPaymentId(null);
-                                  setOpenCourierId(null);
-                                }}
-                                aria-label="Más opciones"
-                                title="Más opciones"
-                              >
-                                <MoreVertical size={16} />
-                              </button>
+                            {(canEditOrders || canDeleteOrders) && (
+                              <div className="relative flex items-center justify-center" onClick={stop}>
+                                <button
+                                  type="button"
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 active:scale-95 transition text-gray-600"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOpenMenuId((v) => (v === o.id ? null : o.id));
+                                    setOpenStatusId(null);
+                                    setOpenPaymentId(null);
+                                    setOpenCourierId(null);
+                                  }}
+                                  aria-label="Más opciones"
+                                  title="Más opciones"
+                                >
+                                  <MoreVertical size={16} />
+                                </button>
 
-                              {openMenuId === o.id && (
-                                <div className="absolute right-0 top-9 w-40 rounded-lg border border-gray-200 bg-white shadow-lg z-50">
-                                  <button className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50" onClick={() => { setOpenMenuId(null); handleEdit(o.id); }}>
-                                    <div className="flex items-center gap-2">
-                                      <Pencil size={14} />
-                                      <span>Editar</span>
-                                    </div>
-                                  </button>
-                                  <button className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50" onClick={() => { setOpenMenuId(null); handleDelete(o.id); }}>
-                                    <div className="flex items-center gap-2">
-                                      <Trash2 size={14} />
-                                      <span>Eliminar</span>
-                                    </div>
-                                  </button>
-                                </div>
-                              )}
-                            </div>
+                                {openMenuId === o.id && (
+                                  <div className="absolute right-0 top-9 w-40 rounded-lg border border-gray-200 bg-white shadow-lg z-50">
+                                    {canEditOrders && (
+                                      <button className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50" onClick={() => { setOpenMenuId(null); handleEdit(o.id); }}>
+                                        <div className="flex items-center gap-2">
+                                          <Pencil size={14} />
+                                          <span>Editar</span>
+                                        </div>
+                                      </button>
+                                    )}
+                                    {canDeleteOrders && (
+                                      <button className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50" onClick={() => { setOpenMenuId(null); handleDelete(o.id); }}>
+                                        <div className="flex items-center gap-2">
+                                          <Trash2 size={14} />
+                                          <span>Eliminar</span>
+                                        </div>
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </td>
                         </tr>
 

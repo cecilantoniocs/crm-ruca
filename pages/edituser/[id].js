@@ -24,6 +24,11 @@ const ROLE_OPTIONS = [
   { value: 'produccion',  label: 'Producción' },
 ];
 
+const CARTERAS_OPTIONS = [
+  { value: 'rucapellan', label: 'Rucapellán' },
+  { value: 'cecil',      label: 'Cecil' },
+];
+
 // ---------------------------------------------
 // helpers de mapeo permisos <-> array backend
 // ---------------------------------------------
@@ -194,7 +199,7 @@ const EditUser = () => {
       name: user?.name || '',
       email: user?.email || '',
       role: (user?.role || 'vendedor').toLowerCase(),
-      partnerTag: user?.partner_tag || user?.partnerTag || '',
+      carteras: Array.isArray(user?.carteras) ? user.carteras : [],
       newPassword: '',
       confirmPassword: '',
       permissions: initialPerms,
@@ -206,7 +211,6 @@ const EditUser = () => {
       role: Yup.string()
         .oneOf(ROLE_OPTIONS.map((r) => r.value))
         .required('El rol es obligatorio'),
-      partnerTag: Yup.string().max(30, 'Máx 30 caracteres'),
       newPassword: Yup.string().min(4, 'Mínimo 4 caracteres').notRequired(),
       confirmPassword: Yup.string().oneOf(
         [Yup.ref('newPassword'), ''],
@@ -230,8 +234,8 @@ const EditUser = () => {
           name: values.name,
           email: values.email,
           role: values.role,
-          partnerTag: values.partnerTag || '',
-          perms: permsList,           // guarda granulares
+          carteras: values.role === 'admin' ? ['rucapellan', 'cecil'] : values.carteras,
+          perms: permsList,
           canDeliver: !!values.canDeliver,
         };
 
@@ -261,9 +265,20 @@ const EditUser = () => {
     formik.setFieldValue('role', newRole);
     const tpl = templateForRole(newRole);
     formik.setFieldValue('permissions', tpl);
+    if (newRole === 'admin') {
+      formik.setFieldValue('carteras', ['rucapellan', 'cecil']);
+    }
     if (newRole === 'repartidor') {
       formik.setFieldValue('canDeliver', true);
     }
+  };
+
+  const toggleCartera = (val) => {
+    const current = formik.values.carteras || [];
+    const next = current.includes(val)
+      ? current.filter((c) => c !== val)
+      : [...current, val];
+    formik.setFieldValue('carteras', next);
   };
 
   const togglePerm = (mod, action) => {
@@ -343,16 +358,32 @@ const EditUser = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-coffee mb-1">
-                Etiqueta de socio (opcional)
-              </label>
-              <input
-                type="text"
-                placeholder="Ej: Cecil"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-1 focus:ring-brand-500"
-                {...formik.getFieldProps('partnerTag')}
-              />
-              {renderError('partnerTag')}
+              <label className="block text-sm font-medium text-coffee mb-1">Carteras</label>
+              <div className="flex gap-3 mt-1">
+                {CARTERAS_OPTIONS.map((c) => {
+                  const checked = (formik.values.carteras || []).includes(c.value);
+                  const isAdminRole = formik.values.role === 'admin';
+                  return (
+                    <label
+                      key={c.value}
+                      className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer ${
+                        checked || isAdminRole
+                          ? 'bg-brand-50 border-brand-200 text-brand-700'
+                          : 'bg-white border-gray-300 text-coffee hover:bg-gray-50'
+                      } ${isAdminRole ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="accent-indigo-600"
+                        checked={checked || isAdminRole}
+                        onChange={() => !isAdminRole && toggleCartera(c.value)}
+                        disabled={isAdminRole}
+                      />
+                      {c.label}
+                    </label>
+                  );
+                })}
+              </div>
             </div>
 
             <div>

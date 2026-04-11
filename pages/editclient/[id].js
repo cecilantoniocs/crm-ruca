@@ -6,7 +6,15 @@ import { useFormik } from 'formik';
 import * as Yup from 'yup';
 import axiosClient from '../../config/axios';
 import Swal from 'sweetalert2';
-import { ArrowLeft, Save } from 'lucide-react';
+import { ArrowLeft, Save, Clock } from 'lucide-react';
+
+const fmtDateTime = (iso) => {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('es-CL', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+};
 
 const normalizePhoneCL = (val) => {
   if (!val) return '';
@@ -298,7 +306,15 @@ const EditClient = () => {
               </div>
             </div>
 
-            <div className="mt-6 flex items-center justify-end gap-3">
+            {/* Metadata */}
+            <div className="mt-6 flex items-center gap-4 border-t border-gray-100 pt-4 text-xs text-gray-400">
+              <Clock size={13} className="shrink-0" />
+              <span>Creado: <span className="text-gray-500 font-medium">{fmtDateTime(client?.createdAt)}</span></span>
+              <span className="text-gray-200">|</span>
+              <span>Modificado: <span className="text-gray-500 font-medium">{fmtDateTime(client?.updatedAt)}</span></span>
+            </div>
+
+            <div className="mt-4 flex items-center justify-end gap-3">
               <button
                 type="button"
                 onClick={() => router.push('/client')}

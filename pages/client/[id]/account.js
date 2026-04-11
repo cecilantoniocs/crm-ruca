@@ -523,8 +523,7 @@ export default function ClientAccountPage() {
       if (!ok.isConfirmed) return;
 
       try {
-        // Nota: aquí NO pasamos wipePayments (no queremos borrar otros abonos si los hubiera)
-        await axiosClient.patch(`orders/${orderId}`, { paid: false });
+        await axiosClient.patch(`orders/${orderId}`, { paid: false, wipePayments: true });
         await bootstrap();
         Swal.fire('Listo', 'El pedido quedó como no pagado.', 'success');
       } catch (e) {

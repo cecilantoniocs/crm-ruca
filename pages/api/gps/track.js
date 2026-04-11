@@ -12,18 +12,22 @@ function parseHM(hm = '00:00') {
 
 /**
  * Retorna un Date en UTC que representa la hora local (zona IANA) indicada.
- * Truco: usamos toLocaleString con { timeZone } para obtener el offset correcto (incluye DST).
+ * Usa el locale 'sv' (sueco) que devuelve "YYYY-MM-DD HH:MM:SS" — independiente
+ * del timezone del runtime, sin depender de cómo Node parsea cadenas locales.
  */
 function zonedLocalToUTC(dateYMD, hhmm = '00:00', timeZone = CL_TZ) {
-  const [Y, M, D] = String(dateYMD).split('-').map(Number);
-  const { h, m } = parseHM(hhmm);
-  // punto base en UTC con los números "tal cual"
-  const baseUtc = new Date(Date.UTC(Y, (M || 1) - 1, D || 1, h, m, 0, 0));
-  // la misma marca formateada en la zona -> parseada como local del runtime
-  const asTzLocal = new Date(baseUtc.toLocaleString('en-US', { timeZone }));
-  // diferencia entre "lo que sería" en esa zona y el UTC base
-  const diffMs = baseUtc.getTime() - asTzLocal.getTime();
-  return new Date(baseUtc.getTime() + diffMs);
+  const hm = String(hhmm).length === 5 ? hhmm : '00:00';
+  // Tratar los números como UTC para obtener un Date base
+  const raw = new Date(`${dateYMD}T${hm}:00.000Z`);
+  // Formatear ese instante UTC en la zona objetivo → da la hora "local" de esa zona
+  // 'sv' siempre produce "YYYY-MM-DD HH:MM:SS" sin importar el timezone del servidor
+  const tzStr = raw.toLocaleString('sv', { timeZone }); // ej: "2025-04-10 20:00:00"
+  // Re-parsear como UTC para obtener la diferencia de offset
+  const tzAsUtc = new Date(tzStr.replace(' ', 'T') + '.000Z');
+  // offset = cuánto movió la zona (negativo cuando zona va atrás de UTC)
+  const offsetMs = tzAsUtc.getTime() - raw.getTime();
+  // Restar el offset para obtener el UTC real del instante local deseado
+  return new Date(raw.getTime() - offsetMs);
 }
 
 /**

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { Users, Boxes, Truck, X, BarChart3, UserCog, Navigation } from 'lucide-react';
+import { Users, Boxes, Truck, X, BarChart3, UserCog, Navigation, ShieldCheck, TrendingUp } from 'lucide-react';
 import axiosClient from '../../config/axios';
 // 👇 helpers de permisos para verificación estricta
 import {
@@ -13,6 +13,12 @@ const Sidebar = ({ menuOpen = false, setMenuOpen }) => {
   const router = useRouter();
   const [canUsersUI, setCanUsersUI] = useState(false);
   const [canTrackingUI, setCanTrackingUI] = useState(false);
+  const [canAuditUI, setCanAuditUI] = useState(false);
+  const [canClientsUI, setCanClientsUI] = useState(false);
+  const [canProductsUI, setCanProductsUI] = useState(false);
+  const [canOrdersUI, setCanOrdersUI] = useState(false);
+  const [canSalesUI, setCanSalesUI] = useState(false);
+  const [canAnalyticsUI, setCanAnalyticsUI] = useState(false);
 
   // Helpers permisos (robustos a mayúsculas/arrays/objeto anidado/flags)
   const normRole = (u) =>
@@ -126,8 +132,14 @@ const Sidebar = ({ menuOpen = false, setMenuOpen }) => {
           const usersStrict = admin || canPerm('users.view', null, localU) || canPerm('users.read', null, localU);
           const trackStrict = admin || canPerm('tracking.view', null, localU);
 
-          setCanUsersUI(usersOkHeur || usersStrict);             // ver Users si tiene "users.read/view" (aunque sea solo lectura)
-          setCanTrackingUI(trackOkHeur && trackStrict);           // tracking requiere pasar ambos
+          setCanUsersUI(usersOkHeur || usersStrict);
+          setCanTrackingUI(trackOkHeur && trackStrict);
+          setCanClientsUI(admin || canPerm('clients.view', null, localU));
+          setCanProductsUI(admin || canPerm('products.view', null, localU));
+          setCanOrdersUI(admin || canPerm('orders.view', null, localU));
+          setCanSalesUI(admin || canPerm('sales.view', null, localU));
+          setCanAuditUI(admin);
+          setCanAnalyticsUI(admin || canPerm('analytics.view', null, localU));
           return;
         }
       } catch {
@@ -176,11 +188,23 @@ const Sidebar = ({ menuOpen = false, setMenuOpen }) => {
         if (mounted) {
           setCanUsersUI(usersOkHeur || usersStrict);
           setCanTrackingUI(trackOkHeur && trackStrict);
+          setCanClientsUI(admin || canPerm('clients.view', null, localU));
+          setCanProductsUI(admin || canPerm('products.view', null, localU));
+          setCanOrdersUI(admin || canPerm('orders.view', null, localU));
+          setCanSalesUI(admin || canPerm('sales.view', null, localU));
+          setCanAuditUI(admin);
+          setCanAnalyticsUI(admin || canPerm('analytics.view', null, localU));
         }
       } catch {
         if (mounted) {
           setCanUsersUI(false);
           setCanTrackingUI(false);
+          setCanClientsUI(false);
+          setCanProductsUI(false);
+          setCanOrdersUI(false);
+          setCanSalesUI(false);
+          setCanAuditUI(false);
+          setCanAnalyticsUI(false);
         }
       }
     })();
@@ -242,25 +266,33 @@ const Sidebar = ({ menuOpen = false, setMenuOpen }) => {
 
         {/* Navegación */}
         <nav className="space-y-1 flex-1">
-          <Link href="/client" className={navItemClass('/client')} onClick={closeMenu}>
-            <Users size={18} />
-            <span>Clientes</span>
-          </Link>
+          {canClientsUI && (
+            <Link href="/client" className={navItemClass('/client')} onClick={closeMenu}>
+              <Users size={18} />
+              <span>Clientes</span>
+            </Link>
+          )}
 
-          <Link href="/products" className={navItemClass('/products')} onClick={closeMenu}>
-            <Boxes size={18} />
-            <span>Productos</span>
-          </Link>
+          {canProductsUI && (
+            <Link href="/products" className={navItemClass('/products')} onClick={closeMenu}>
+              <Boxes size={18} />
+              <span>Productos</span>
+            </Link>
+          )}
 
-          <Link href="/orders" className={navItemClass('/orders')} onClick={closeMenu}>
-            <Truck size={18} />
-            <span>Pedidos</span>
-          </Link>
+          {canOrdersUI && (
+            <Link href="/orders" className={navItemClass('/orders')} onClick={closeMenu}>
+              <Truck size={18} />
+              <span>Pedidos</span>
+            </Link>
+          )}
 
-          <Link href="/sales" className={navItemClass('/sales')} onClick={closeMenu}>
-            <BarChart3 size={18} />
-            <span>Ventas</span>
-          </Link>
+          {canSalesUI && (
+            <Link href="/sales" className={navItemClass('/sales')} onClick={closeMenu}>
+              <BarChart3 size={18} />
+              <span>Ventas</span>
+            </Link>
+          )}
 
           {/* Tracking (permiso tracking.view, gps.view, etc.) */}
           {canTrackingUI && (
@@ -282,16 +314,31 @@ const Sidebar = ({ menuOpen = false, setMenuOpen }) => {
               <span>Usuarios</span>
             </Link>
           )}
+
+          {canAnalyticsUI && (
+            <Link href="/analytics" className={navItemClass('/analytics')} onClick={closeMenu}>
+              <TrendingUp size={18} />
+              <span>Analytics</span>
+            </Link>
+          )}
+
+          {/* Auditoría (solo admins) */}
+          {canAuditUI && (
+            <Link href="/audit" className={navItemClass('/audit')} onClick={closeMenu}>
+              <ShieldCheck size={18} />
+              <span>Auditoría</span>
+            </Link>
+          )}
         </nav>
 
         {/* Footer */}
         <div className="pt-5">
           <div className="rounded-lg bg-[#000000] text-white text-xs px-3 py-2 font-medium shadow-sm">
             <div className="text-[11px] uppercase tracking-wide opacity-80 mb-0.5">
-              RookApp v5.0
+              RookApp v6.0
             </div>
-                        <div className="text-[9px] uppercase tracking-wide opacity-80 mb-0.5">
-              Last Update 24-11-25
+            <div className="text-[9px] uppercase tracking-wide opacity-80 mb-0.5">
+              Last Update 11-04-26
             </div>
             <div>
               Developed by <span className="font-semibold">Cecil</span> ⚡

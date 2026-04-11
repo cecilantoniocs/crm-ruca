@@ -255,8 +255,8 @@ export default function Products() {
 
       {/* Header de página */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4">
-        <h1 className="text-3xl font-bold text-coffee-900 tracking-tight">
-          Maestro de <span className="text-brand-700">Productos</span>
+        <h1 className="text-3xl font-bold text-coffee tracking-tight">
+          Maestro de <span className="text-brand-600">Productos</span>
         </h1>
 
         <div className="mt-3 sm:mt-0 flex items-center gap-2">
@@ -300,7 +300,8 @@ export default function Products() {
       </div>
 
       {/* Buscador */}
-      <div className="relative mb-6 max-w-md">
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 mb-6">
+      <div className="relative max-w-md">
         <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
         <input
           type="text"
@@ -314,6 +315,7 @@ export default function Products() {
             Para guardar el nuevo orden, limpia el buscador (deja vacío el campo).
           </p>
         )}
+      </div>
       </div>
 
       {loading && <p className="text-gray-600">Cargando productos…</p>}

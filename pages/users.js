@@ -132,13 +132,13 @@ export default function UsersPage() {
       </div>
 
       {/* Buscador */}
-      <div className="mb-5">
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 mb-6">
         <div className="relative max-w-md w-full">
           <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
           <input
             type="text"
             placeholder="Buscar por nombre o email…"
-            className="pl-10 pr-4 py-2 w-full rounded-lg border border-gray-300 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm"
+            className="pl-10 pr-4 py-2 w-full rounded-lg border border-gray-300 shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600 text-sm"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />

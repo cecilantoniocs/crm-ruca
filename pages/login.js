@@ -27,7 +27,9 @@ export default function LoginPage() {
       const next = router.query.next ? decodeURIComponent(router.query.next) : '/';
       router.replace(next);
     }
-  }, [router, router.query.next]);
+  // Solo re-ejecutar si cambia el parámetro next, no en cada cambio del router
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, router.query.next]);
 
   const formik = useFormik({
     initialValues: { email: '', password: '' },
@@ -173,7 +175,7 @@ export default function LoginPage() {
             {/* Pie de tarjeta */}
             <div className="mt-6 text-center">
               <div className="inline-flex items-center gap-2 rounded-lg bg-[rgb(39,39,38)] px-3 py-1.5 text-xs font-medium text-white shadow-sm">
-                <span>RookApp v5.0</span>
+                <span>RookApp v6.0</span>
                 <span className="opacity-70">•</span>
                 <span>Developed by Cecil ⚡</span>
               </div>

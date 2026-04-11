@@ -43,7 +43,7 @@ export default async function handler(req, res) {
     dbg.stage = 'db_lookup';
     const { data: u, error } = await supabaseServer
       .from('users_app')
-      .select('id,name,email,is_admin,permissions,partner_tag,can_deliver,role,password_hash')
+      .select('id,name,email,is_admin,permissions,partner_tag,can_deliver,role,password_hash,carteras')
       .ilike('email', e)
       .maybeSingle();
 
@@ -82,6 +82,15 @@ export default async function handler(req, res) {
 
     dbg.stage = 'sign_jwt';
     const perms = normalizePerms(u.permissions);
+
+    // carteras: usa la columna nueva; fallback a partner_tag; admins tienen todas
+    let carteras = Array.isArray(u.carteras) ? u.carteras : [];
+    if (!!u.is_admin) {
+      carteras = ['rucapellan', 'cecil'];
+    } else if (carteras.length === 0 && u.partner_tag) {
+      carteras = [u.partner_tag];
+    }
+
     const payload = {
       id: u.id,
       email: u.email,
@@ -91,6 +100,7 @@ export default async function handler(req, res) {
       partner_tag: u.partner_tag || '',
       can_deliver: !!u.can_deliver,
       role: u.role || null,
+      carteras,
     };
 
     const secret = process.env.JWT_SECRET || '';

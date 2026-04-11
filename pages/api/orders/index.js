@@ -1,6 +1,7 @@
 // /pages/api/orders/index.js
 import { supabaseServer } from '@/lib/supabaseServer';
 import { getReqUser, requirePerm } from '@/server/guard';
+import { logAudit } from '@/server/audit';
 import { z } from 'zod';
 
 // ---------- Utils ----------
@@ -101,6 +102,15 @@ const toCamel = (o) => ({
   })),
 });
 
+const ALL_OWNERS = ['rucapellan', 'cecil'];
+
+function getUserCarteras(user) {
+  if (!user) return [];
+  if (user.is_admin || user.isAdmin) return ALL_OWNERS;
+  const c = Array.isArray(user.carteras) ? user.carteras : [];
+  return c.length > 0 ? c : (user.partner_tag ? [user.partner_tag] : []);
+}
+
 export default async function handler(req, res) {
   const user = getReqUser(req);
   if (!user) return res.status(401).json({ error: 'No autenticado' });
@@ -121,6 +131,18 @@ export default async function handler(req, res) {
       if (!parsed.success) return res.status(400).json({ error: 'Parámetros inválidos' });
 
       const { q, status, from, to, sellerId, courierId } = parsed.data;
+
+      // filtrar por carteras del usuario (orders no tiene client_owner, usamos client_id)
+      let allowedClientIds = null;
+      const userCarteras = getUserCarteras(user);
+      if (userCarteras.length < ALL_OWNERS.length) {
+        const { data: allowedClients } = await supabaseServer
+          .from('clients')
+          .select('id')
+          .in('client_owner', userCarteras);
+        allowedClientIds = (allowedClients || []).map((c) => c.id);
+        if (allowedClientIds.length === 0) return res.json([]);
+      }
 
       const baseCols = `
         id, client_id, client_name, client_local, seller_id, delivered_by,
@@ -143,6 +165,7 @@ export default async function handler(req, res) {
         if (courierId) qy = qy.eq('delivered_by', courierId);
         if (from) qy = qy.gte('created_at', startOfDayISO(from));
         if (to)   qy = qy.lt('created_at', nextDayISO(to));
+        if (allowedClientIds) qy = qy.in('client_id', allowedClientIds);
         return qy;
       };
 
@@ -295,6 +318,7 @@ export default async function handler(req, res) {
         dto.balance = Math.max(0, Number(dto.total) || 0);
       }
 
+      await logAudit(user, { action: 'order.created', entity: 'order', entityId: orderId, description: `Pedido creado — ${body.client_name || ''}` });
       return res.status(201).json(dto);
     }
 

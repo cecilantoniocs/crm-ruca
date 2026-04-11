@@ -1,8 +1,17 @@
 // /pages/api/clients/[id].js
 import { supabaseServer } from '@/lib/supabaseServer';
 import { getReqUser, requirePerm } from '@/server/guard';
+import { logAudit } from '@/server/audit';
 
 const DB_TYPES = ['B2B', 'B2C'];
+const ALL_OWNERS = ['rucapellan', 'cecil'];
+
+function getUserCarteras(user) {
+  if (!user) return [];
+  if (user.is_admin || user.isAdmin) return ALL_OWNERS;
+  const c = Array.isArray(user.carteras) ? user.carteras : [];
+  return c.length > 0 ? c : (user.partner_tag ? [user.partner_tag] : []);
+}
 const toDBClientType = (v) => {
   const up = String(v || '').trim().toUpperCase();
   if (!up) return undefined; // no tocar si no viene
@@ -41,6 +50,8 @@ function mapRow(c) {
     ownerId: c.owner_id,
     clientType: c.client_type ? String(c.client_type).toLowerCase() : null,
     clientOwner: c.client_owner,
+    createdAt: c.created_at ?? null,
+    updatedAt: c.updated_at ?? null,
   };
 }
 
@@ -54,7 +65,7 @@ export default async function handler(req, res) {
 
       const { data, error } = await supabaseServer
         .from('clients')
-        .select('id,name,local_name,dir1,zona,ciudad,telefono,email,rut,razon_social,owner_id,client_type,client_owner')
+        .select('id,name,local_name,dir1,zona,ciudad,telefono,email,rut,razon_social,owner_id,client_type,client_owner,created_at,updated_at')
         .eq('id', id)
         .maybeSingle();
 
@@ -65,6 +76,19 @@ export default async function handler(req, res) {
 
     if (req.method === 'PATCH') {
       requirePerm(user, 'clients.update');
+
+      // verificar acceso a la cartera del cliente
+      const { data: existing, error: existErr } = await supabaseServer
+        .from('clients')
+        .select('client_owner')
+        .eq('id', id)
+        .maybeSingle();
+      if (existErr) throw existErr;
+      if (!existing) return res.status(404).json({ error: 'No encontrado' });
+      const userCarteras = getUserCarteras(user);
+      if (!userCarteras.includes(existing.client_owner)) {
+        return res.status(403).json({ error: 'Sin acceso a esa cartera' });
+      }
 
       const body = req.body || {};
       const patch = {};
@@ -96,11 +120,25 @@ export default async function handler(req, res) {
 
       if (error) throw error;
       if (!data) return res.status(404).json({ error: 'No encontrado' });
+      await logAudit(user, { action: 'client.updated', entity: 'client', entityId: id, description: `Cliente editado — ${data.name || ''}` });
       return res.status(200).json(mapRow(data));
     }
 
     if (req.method === 'DELETE') {
       requirePerm(user, 'clients.delete');
+
+      // verificar acceso a la cartera del cliente
+      const { data: toDelete, error: delCheckErr } = await supabaseServer
+        .from('clients')
+        .select('client_owner')
+        .eq('id', id)
+        .maybeSingle();
+      if (delCheckErr) throw delCheckErr;
+      if (!toDelete) return res.status(404).json({ error: 'No encontrado' });
+      const userCarteras = getUserCarteras(user);
+      if (!userCarteras.includes(toDelete.client_owner)) {
+        return res.status(403).json({ error: 'Sin acceso a esa cartera' });
+      }
 
       const { error } = await supabaseServer
         .from('clients')
@@ -108,6 +146,7 @@ export default async function handler(req, res) {
         .eq('id', id);
 
       if (error) throw error;
+      await logAudit(user, { action: 'client.deleted', entity: 'client', entityId: id, description: 'Cliente eliminado' });
       return res.status(204).end();
     }
 

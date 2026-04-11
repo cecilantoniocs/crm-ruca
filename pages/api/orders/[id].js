@@ -1,7 +1,19 @@
 // /pages/api/orders/[id].js
 import { supabaseServer } from '@/lib/supabaseServer';
 import { getReqUser, requirePerm } from '@/server/guard';
+import { logAudit } from '@/server/audit';
 import { z } from 'zod';
+
+function detectOrderAction(body) {
+  if (body.paid === false)                                         return { action: 'order.unpaid',                  description: 'Pedido marcado como no pagado' };
+  if (body.paid === true)                                          return { action: 'order.paid',                    description: 'Pedido marcado como pagado' };
+  if ('status' in body && body.status === 'entregado')            return { action: 'order.delivered',               description: 'Pedido marcado como entregado' };
+  if ('status' in body && body.status === 'pendiente')            return { action: 'order.status_changed',          description: 'Estado cambiado a pendiente' };
+  if ('deliveredBy' in body || 'delivered_by' in body)            return { action: 'order.courier_assigned',        description: 'Repartidor asignado' };
+  if ('paymentMethod' in body || 'payment_method' in body)        return { action: 'order.payment_method_changed',  description: `Método de pago: ${body.paymentMethod ?? body.payment_method ?? '—'}` };
+  if ('invoice' in body || 'invoiceSent' in body || 'invoice_sent' in body) return { action: 'order.invoice_updated', description: 'Factura actualizada' };
+  return { action: 'order.updated', description: 'Pedido editado' };
+}
 
 // ---------- Payment method (normalización y whitelist) ----------
 const ALLOWED_PM = new Set(['efectivo', 'transferencia', 'cheque']);
@@ -424,6 +436,7 @@ export default async function handler(req, res) {
         dto.amountPaid = amountPaid;
         dto.balance = Math.max(0, total - amountPaid);
 
+        await logAudit(user, { action: 'order.unpaid', entity: 'order', entityId: id, description: body.wipePayments ? 'Pedido marcado como no pagado y abonos eliminados' : 'Pedido marcado como no pagado' });
         return res.status(200).json(dto);
       }
 
@@ -570,6 +583,8 @@ export default async function handler(req, res) {
         dto.balance = Math.max(0, Number(dto.total) || 0);
       }
 
+      const { action, description } = detectOrderAction(body);
+      await logAudit(user, { action, entity: 'order', entityId: id, description });
       return res.status(200).json(dto);
     }
 
@@ -578,6 +593,7 @@ export default async function handler(req, res) {
 
       const { error } = await supabaseServer.from('orders').delete().eq('id', id);
       if (error) throw error;
+      await logAudit(user, { action: 'order.deleted', entity: 'order', entityId: id, description: 'Pedido eliminado' });
       return res.status(204).end();
     }
 

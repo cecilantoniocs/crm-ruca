@@ -106,8 +106,9 @@ export default function App({ Component, pageProps }) {
     const onControllerChange = () => {
       if (refreshing) return;
       refreshing = true;
-      // Cuando el nuevo SW toma control, recargamos para usar la nueva versión
-      window.location.reload();
+      // Solo recargamos si no estamos en medio de un login/navegación crítica
+      const isLoggingIn = window.location.pathname === '/login';
+      if (!isLoggingIn) window.location.reload();
     };
 
     const promptUserToRefresh = (registration) => {

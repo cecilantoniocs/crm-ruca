@@ -5,7 +5,15 @@ import bcrypt from 'bcryptjs';
 
 /* ====== helpers compartidos ====== */
 const SELECT_FIELDS =
-  'id,name,email,role,is_admin,permissions,created_at,partner_tag,can_deliver,last_seen_at';
+  'id,name,email,role,is_admin,permissions,created_at,partner_tag,can_deliver,last_seen_at,carteras';
+
+const ALL_CARTERAS = ['rucapellan', 'cecil'];
+
+function coerceCarteras(val, isAdmin = false) {
+  if (isAdmin) return ALL_CARTERAS;
+  if (Array.isArray(val)) return val.filter((v) => ALL_CARTERAS.includes(String(v)));
+  return [];
+}
 
 const ALLOWED_ROLES = new Set(['admin', 'vendedor', 'supervisor', 'repartidor', 'produccion']);
 
@@ -79,16 +87,18 @@ function normalizeRole(raw) {
 function mapRow(u) {
   if (!u) return null;
   const lastMs = u.last_seen_at ? new Date(u.last_seen_at).getTime() : 0;
-  const online = lastMs ? (Date.now() - lastMs) <= 120_000 : false; // 2 minutos
+  const online = lastMs ? (Date.now() - lastMs) <= 120_000 : false;
+  const isAdmin = !!u.is_admin;
   return {
     id: u.id,
     name: u.name,
     email: u.email,
     role: u.role || null,
-    is_admin: !!u.is_admin,
+    is_admin: isAdmin,
     partner_tag: u.partner_tag || '',
     can_deliver: !!u.can_deliver,
     permissions: Array.isArray(u.permissions) ? u.permissions : [],
+    carteras: coerceCarteras(u.carteras, isAdmin),
     created_at: u.created_at,
     last_seen_at: u.last_seen_at || null,
     online,
@@ -141,6 +151,7 @@ export default async function handler(req, res) {
       const canDeliver = !!(body.can_deliver ?? body.canDeliver);
       const isAdmin = !!(body.is_admin ?? body.isAdmin);
       const perms = coercePermList(body.permissions ?? body.perms);
+      const carteras = coerceCarteras(body.carteras, isAdmin);
 
       let password_hash = null;
       if (body.password && String(body.password).trim()) {
@@ -155,8 +166,8 @@ export default async function handler(req, res) {
         partner_tag: partnerTag,
         can_deliver: canDeliver,
         permissions: perms,
+        carteras,
         password_hash,
-        // last_seen_at: null (lo setea /api/auth/ping)
       };
 
       let ins = await supabaseServer

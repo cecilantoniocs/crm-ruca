@@ -10,7 +10,7 @@ import PullToRefreshHeader from '../components/PullToRefreshHeader';
 import usePullToRefreshWindow from '../hooks/usePullToRefreshWindow';
 
 // 🔹 Usuario + prefs
-import { getCurrentUser } from '../helpers/permissions';
+import { getCurrentUser, can, isAdmin } from '../helpers/permissions';
 import { loadUserFilterPrefs, saveUserFilterPrefs, resolveDefaultOwner } from '../helpers/filterPrefs';
 
 const pillCls = 'inline-flex items-center rounded-full ring-1 px-2 py-0.5 text-[11px] font-medium';
@@ -30,6 +30,11 @@ const ClientPage = () => {
 
   // 🔹 Usuario actual
   const me = useMemo(() => getCurrentUser?.(), []);
+  const canCreateClients = useMemo(() => isAdmin(me) || can('clients.create', null, me), [me]);
+  const canEditClients   = useMemo(() => isAdmin(me) || can('clients.edit',   null, me), [me]);
+  const canDeleteClients = useMemo(() => isAdmin(me) || can('clients.delete', null, me), [me]);
+  const canViewAccount   = useMemo(() => isAdmin(me) || can('clientAccount.read', null, me), [me]);
+  const canCreateOrders  = useMemo(() => isAdmin(me) || can('orders.create',  null, me), [me]);
 
   // 🔹 Persistencia de filtros (misma lógica que sales.js / orders.js)
   const FILTERS_KEY = 'clients.filters.v1';
@@ -235,20 +240,23 @@ const ClientPage = () => {
 
       {/* Header + acciones */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
-        <h1 className="text-3xl font-bold text-coffee-900 tracking-tight">
-          Lista de <span className="text-brand-700">Clientes</span>
+        <h1 className="text-3xl font-bold text-coffee tracking-tight">
+          Lista de <span className="text-brand-600">Clientes</span>
         </h1>
 
-        <button
-          onClick={() => router.push('/newclient')}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-600 text-white font-medium shadow hover:bg-brand-700 active:scale-95 transition"
-        >
-          <UserPlus size={18} />
-          Nuevo Cliente
-        </button>
+        {canCreateClients && (
+          <button
+            onClick={() => router.push('/newclient')}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-600 text-white font-medium shadow hover:bg-brand-700 active:scale-95 transition"
+          >
+            <UserPlus size={18} />
+            Nuevo Cliente
+          </button>
+        )}
       </div>
 
-      {/* Filtros superiores */}
+      {/* Filtros */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 mb-6">
       <div className="grid gap-3 sm:grid-cols-3 sm:items-end mb-2">
         {/* Buscar */}
         <div className="relative">
@@ -296,8 +304,8 @@ const ClientPage = () => {
         </div>
       </div>
 
-      {/* Botón Guardar filtros + aviso de guardado (alineado a la derecha, como sales/orders) */}
-      <div className="mb-6 flex items-center justify-end gap-3">
+      {/* Botón Guardar filtros */}
+      <div className="flex items-center justify-end gap-3 mt-2">
         {justSaved && (
           <span className="inline-flex items-center gap-1 text-emerald-700 text-sm">
             <Check size={16} /> Guardado
@@ -313,6 +321,7 @@ const ClientPage = () => {
             <Save size={16} /> Guardar
           </button>
         )}
+      </div>
       </div>
 
       {loading && <p className="text-gray-600">Cargando clientes…</p>}
@@ -335,44 +344,50 @@ const ClientPage = () => {
                 onClick={stop}
               >
                 {/* Botón ⋯ arriba derecha */}
-                <div className="absolute right-2 top-2">
-                  <button
-                    type="button"
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 active:scale-95 transition text-gray-600"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setOpenMenuId((v) => (v === c.id ? null : c.id));
-                    }}
-                    aria-label="Más opciones"
-                    title="Más opciones"
-                  >
-                    <MoreVertical size={18} />
-                  </button>
-
-                  {/* Menú flotante */}
-                  {openMenuId === c.id && (
-                    <div
-                      className={
-                        `absolute right-0 w-36 rounded-lg border border-gray-200 bg-white shadow-lg z-50 ` +
-                        (isLast ? 'bottom-9 top-auto origin-bottom-right' : 'top-9 origin-top-right')
-                      }
-                      onClick={stop}
+                {(canEditClients || canDeleteClients) && (
+                  <div className="absolute right-2 top-2">
+                    <button
+                      type="button"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 active:scale-95 transition text-gray-600"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenMenuId((v) => (v === c.id ? null : c.id));
+                      }}
+                      aria-label="Más opciones"
+                      title="Más opciones"
                     >
-                      <button
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                        onClick={() => { setOpenMenuId(null); handleEdit(c.id); }}
+                      <MoreVertical size={18} />
+                    </button>
+
+                    {/* Menú flotante */}
+                    {openMenuId === c.id && (
+                      <div
+                        className={
+                          `absolute right-0 w-36 rounded-lg border border-gray-200 bg-white shadow-lg z-50 ` +
+                          (isLast ? 'bottom-9 top-auto origin-bottom-right' : 'top-9 origin-top-right')
+                        }
+                        onClick={stop}
                       >
-                        Editar
-                      </button>
-                      <button
-                        className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
-                        onClick={() => { setOpenMenuId(null); handleDelete(c.id); }}
-                      >
-                        Eliminar
-                      </button>
-                    </div>
-                  )}
-                </div>
+                        {canEditClients && (
+                          <button
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                            onClick={() => { setOpenMenuId(null); handleEdit(c.id); }}
+                          >
+                            Editar
+                          </button>
+                        )}
+                        {canDeleteClients && (
+                          <button
+                            className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
+                            onClick={() => { setOpenMenuId(null); handleDelete(c.id); }}
+                          >
+                            Eliminar
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Título + chips */}
                 <div className="pr-10">
@@ -407,24 +422,28 @@ const ClientPage = () => {
                     )}
 
                     {/* Cuenta (móvil) */}
-                    <button
-                      onClick={() => handleAccount(c.id)}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-sky-500 text-white hover:bg-sky-600 shadow-sm active:scale-95 transition"
-                      aria-label="Cuenta del cliente"
-                      title="Cuenta del cliente"
-                    >
-                      <Receipt size={18} />
-                    </button>
+                    {canViewAccount && (
+                      <button
+                        onClick={() => handleAccount(c.id)}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-sky-500 text-white hover:bg-sky-600 shadow-sm active:scale-95 transition"
+                        aria-label="Cuenta del cliente"
+                        title="Cuenta del cliente"
+                      >
+                        <Receipt size={18} />
+                      </button>
+                    )}
                   </div>
 
-                  <button
-                    onClick={() => handleNewOrder(c.id)}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-amber-500 text-white hover:bg-amber-600 shadow-sm active:scale-95 transition"
-                    aria-label="Nuevo pedido"
-                    title="Nuevo pedido"
-                  >
-                    <ShoppingCart size={18} />
-                  </button>
+                  {canCreateOrders && (
+                    <button
+                      onClick={() => handleNewOrder(c.id)}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-amber-500 text-white hover:bg-amber-600 shadow-sm active:scale-95 transition"
+                      aria-label="Nuevo pedido"
+                      title="Nuevo pedido"
+                    >
+                      <ShoppingCart size={18} />
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -488,67 +507,77 @@ const ClientPage = () => {
 
                       {/* Pedido */}
                       <td className="px-4 lg:px-6 py-3 text-center">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleNewOrder(c.id); }}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-amber-500 text-white hover:bg-amber-600 shadow-sm active:scale-95 transition"
-                          aria-label="Nuevo pedido"
-                          title="Nuevo pedido"
-                        >
-                          <ShoppingCart size={16} />
-                        </button>
+                        {canCreateOrders && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleNewOrder(c.id); }}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-amber-500 text-white hover:bg-amber-600 shadow-sm active:scale-95 transition"
+                            aria-label="Nuevo pedido"
+                            title="Nuevo pedido"
+                          >
+                            <ShoppingCart size={16} />
+                          </button>
+                        )}
                       </td>
 
                       {/* Cuenta */}
                       <td className="px-4 lg:px-6 py-3 text-center">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleAccount(c.id); }}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-sky-500 text-white hover:bg-sky-600 shadow-sm active:scale-95 transition"
-                          aria-label="Cuenta del cliente"
-                          title="Cuenta del cliente"
-                        >
-                          <Receipt size={16} />
-                        </button>
+                        {canViewAccount && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleAccount(c.id); }}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-sky-500 text-white hover:bg-sky-600 shadow-sm active:scale-95 transition"
+                            aria-label="Cuenta del cliente"
+                            title="Cuenta del cliente"
+                          >
+                            <Receipt size={16} />
+                          </button>
+                        )}
                       </td>
 
                       {/* Acciones */}
                       <td className="px-4 lg:px-6 py-3">
-                        <div className="relative flex items-center justify-center">
-                          <button
-                            type="button"
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 active:scale-95 transition text-gray-600"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setOpenMenuId((v) => (v === c.id ? null : c.id));
-                            }}
-                            aria-label="Más opciones"
-                            title="Más opciones"
-                          >
-                            <MoreVertical size={16} />
-                          </button>
-
-                          {openMenuId === c.id && (
-                            <div
-                              className={
-                                `absolute right-0 w-36 rounded-lg border border-gray-200 bg-white shadow-lg z-50 ` +
-                                (isLast ? 'bottom-9 top-auto origin-bottom-right' : 'top-9 origin-top-right')
-                              }
-                              onClick={stop}
+                        {(canEditClients || canDeleteClients) && (
+                          <div className="relative flex items-center justify-center">
+                            <button
+                              type="button"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-gray-100 active:scale-95 transition text-gray-600"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenMenuId((v) => (v === c.id ? null : c.id));
+                              }}
+                              aria-label="Más opciones"
+                              title="Más opciones"
                             >
-                              <button
-                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                                onClick={() => { setOpenMenuId(null); handleEdit(c.id); }}
+                              <MoreVertical size={16} />
+                            </button>
+
+                            {openMenuId === c.id && (
+                              <div
+                                className={
+                                  `absolute right-0 w-36 rounded-lg border border-gray-200 bg-white shadow-lg z-50 ` +
+                                  (isLast ? 'bottom-9 top-auto origin-bottom-right' : 'top-9 origin-top-right')
+                                }
+                                onClick={stop}
                               >
-                                Editar
-                              </button>
-                              <button
-                                className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
-                                onClick={() => { setOpenMenuId(null); handleDelete(c.id); }}
-                              >
-                                Eliminar
-                              </button>
-                            </div>
-                          )}
-                        </div>
+                                {canEditClients && (
+                                  <button
+                                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                                    onClick={() => { setOpenMenuId(null); handleEdit(c.id); }}
+                                  >
+                                    Editar
+                                  </button>
+                                )}
+                                {canDeleteClients && (
+                                  <button
+                                    className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
+                                    onClick={() => { setOpenMenuId(null); handleDelete(c.id); }}
+                                  >
+                                    Eliminar
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );

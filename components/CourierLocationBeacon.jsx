@@ -1,13 +1,17 @@
-import { useEffect } from 'react';
+// components/CourierLocationBeacon.jsx
+// Envía la ubicación del repartidor al servidor mientras la app está abierta.
+// - Usa watchPosition (una sola solicitud continua) en vez de getCurrentPosition + intervalo.
+// - Nunca dispara el diálogo del sistema automáticamente: muestra un banner
+//   que el usuario toca para activar. Así el repartidor decide cuándo otorgar permiso.
+// - En iOS el permiso se resetea al cerrar la PWA; el banner reaparece al abrir.
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { MapPin, X } from 'lucide-react';
 import axiosClient from '@/config/axios';
 import { getCurrentUser } from '@/helpers/permissions';
 
 function safeGetMe() {
-  // Intenta auth local y fallback a localStorage
-  try {
-    const me = getCurrentUser?.();
-    if (me) return me;
-  } catch {}
+  try { const me = getCurrentUser?.(); if (me) return me; } catch {}
   try {
     const raw = typeof window !== 'undefined' ? localStorage.getItem('userData') : null;
     return raw ? JSON.parse(raw) : null;
@@ -15,80 +19,193 @@ function safeGetMe() {
   return null;
 }
 
-export default function CourierLocationBeacon({ intervalMs = 5 * 60 * 1000 }) {
-  // Evita SSR
+// Tracking adaptativo:
+// - En movimiento (≥ MOVE_THRESHOLD_M desplazado): ping cada INTERVAL_MOVING ms
+// - Detenido: ping cada INTERVAL_STOPPED ms (heartbeat para confirmar que sigue activo)
+// - Ruido GPS: ignorar desplazamientos < MIN_DISTANCE_M metros
+const MIN_DISTANCE_M      = 15;          // filtro de ruido GPS
+const MOVE_THRESHOLD_M    = 50;          // a partir de aquí se considera "en movimiento"
+const INTERVAL_MOVING     = 15_000;      // 15 s cuando se mueve
+const INTERVAL_STOPPED    = 90_000;      // 90 s cuando está detenido
+
+function distanceMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+export default function CourierLocationBeacon() {
   if (typeof window === 'undefined') return null;
 
+  const me = safeGetMe();
+  const canDeliver =
+    me?.can_deliver === true ||
+    me?.canDeliver === true ||
+    String(me?.can_deliver || me?.canDeliver).toLowerCase() === 'true';
+
+  // Solo para repartidores (can_deliver = true)
+  if (!canDeliver) return null;
+
+  return <BeaconInner />;
+}
+
+function BeaconInner() {
+  // 'unknown' | 'prompt' | 'granted' | 'denied'
+  const [permState, setPermState] = useState('unknown');
+  const [dismissed, setDismissed] = useState(false);
+  const watchIdRef   = useRef(null);
+  const lastPosRef   = useRef(null); // { lat, lng }
+  const lastPingRef  = useRef(0);    // timestamp ms
+
+  const sendPing = useCallback(async (lat, lng, accuracy) => {
+    try {
+      await axiosClient.post('/gps/ping', { lat, lng, accuracy });
+    } catch (e) {
+      console.warn('[Beacon] ping fail', e?.message || e);
+    }
+  }, []);
+
+  const onPosition = useCallback((pos) => {
+    const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+    const now  = Date.now();
+    const last = lastPosRef.current;
+
+    const distM    = last ? distanceMeters(last.lat, last.lng, lat, lng) : Infinity;
+    const moving   = distM >= MOVE_THRESHOLD_M;
+    const interval = moving ? INTERVAL_MOVING : INTERVAL_STOPPED;
+    const elapsed  = now - lastPingRef.current;
+
+    // Ignorar si no pasó el intervalo correspondiente Y el movimiento es ruido GPS
+    if (elapsed < interval && distM < MIN_DISTANCE_M) return;
+    // En movimiento: ping al llegar al intervalo; detenido: esperar el heartbeat
+    if (elapsed < interval) return;
+
+    lastPosRef.current  = { lat, lng };
+    lastPingRef.current = now;
+    sendPing(lat, lng, accuracy);
+  }, [sendPing]);
+
+  const startWatch = useCallback(() => {
+    if (watchIdRef.current !== null) return; // ya activo
+    if (!('geolocation' in navigator)) return;
+
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        setPermState('granted');
+        setDismissed(false);
+        onPosition(pos);
+      },
+      (err) => {
+        if (err.code === 1 /* PERMISSION_DENIED */) {
+          setPermState('denied');
+        } else {
+          console.warn('[Beacon] geo error', err.code, err.message);
+        }
+        stopWatch();
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 }
+    );
+  }, [onPosition]);
+
+  const stopWatch = useCallback(() => {
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+  }, []);
+
+  // Al montar: consultar estado del permiso sin disparar el diálogo
   useEffect(() => {
-    const me = safeGetMe();
-
-    // Normaliza flags
-    const isAdmin = !!(me?.is_admin || me?.isAdmin);
-    const canDeliver =
-        me?.can_deliver === true ||
-        me?.canDeliver === true ||
-        String(me?.can_deliver || me?.canDeliver).toLowerCase() === 'true';
-
-
-    // <<< CLAVE: rastrear si es admin (testing) O si puede repartir >>>
-    if (!isAdmin && !canDeliver) {
-      // console.debug('[Beacon] skip: no admin ni can_deliver');
+    if (!('geolocation' in navigator)) {
+      setPermState('denied');
       return;
     }
 
-    const pingOnce = () => {
-      if (!('geolocation' in navigator)) return;
+    navigator.permissions
+      ?.query({ name: 'geolocation' })
+      .then((status) => {
+        setPermState(status.state); // 'granted' | 'prompt' | 'denied'
 
-      navigator.geolocation.getCurrentPosition(
-        async (pos) => {
-          const { latitude, longitude, accuracy } = pos.coords || {};
-          try {
-            await axiosClient.post('/gps/ping', {
-              lat: latitude,
-              lng: longitude,
-              accuracy,
-            });
-            // console.debug('[Beacon] ping ok', latitude, longitude, accuracy);
-          } catch (e) {
-            console.warn('[Beacon] ping fail', e?.message || e);
+        // Si ya está concedido, iniciar tracking silenciosamente
+        if (status.state === 'granted') startWatch();
+
+        // Reaccionar si el usuario cambia el permiso desde configuración
+        status.onchange = () => {
+          setPermState(status.state);
+          if (status.state === 'granted') {
+            startWatch();
+          } else {
+            stopWatch();
           }
-        },
-        (err) => {
-          // Si el usuario denegó anteriormente, no se vuelve a pedir sin intervención
-          console.warn('[Beacon] geo error', err?.code, err?.message);
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-      );
-    };
+        };
+      })
+      .catch(() => {
+        // Navegador no soporta Permissions API (ej. Firefox antiguo)
+        // En este caso no sabemos el estado; mostramos el banner igualmente
+        setPermState('prompt');
+      });
 
+    return () => stopWatch();
+  }, []); // eslint-disable-line
+
+  // Reactivar tracking cuando el repartidor vuelve a la pestaña (y el watch fue detenido)
+  useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState === 'visible') pingOnce();
+      if (document.visibilityState === 'visible' && permState === 'granted') {
+        startWatch();
+      }
     };
-
-    // Dispara al inicio respetando permisos
-    try {
-      navigator.permissions
-        ?.query({ name: 'geolocation' })
-        .then((st) => {
-          if (st.state === 'granted' || st.state === 'prompt') pingOnce();
-          st.onchange = () => {
-            if (st.state === 'granted') pingOnce();
-          };
-        })
-        .catch(() => pingOnce());
-    } catch {
-      pingOnce();
-    }
-
-    // Repite cada X min y al volver a pestaña
-    const id = window.setInterval(pingOnce, intervalMs);
     document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [permState, startWatch]);
 
-    return () => {
-      window.clearInterval(id);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  }, [intervalMs]);
+  // ── UI ──────────────────────────────────────────────────────────────────────
 
-  return null;
+  // Ya concedido y activo → sin UI
+  if (permState === 'granted') return null;
+
+  // Banner descartado temporalmente
+  if (dismissed) return null;
+
+  // Permiso denegado explícitamente
+  if (permState === 'denied') {
+    return (
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[9999] w-[calc(100%-2rem)] max-w-sm">
+        <div className="flex items-start gap-3 rounded-xl bg-rose-50 border border-rose-200 shadow-lg px-4 py-3">
+          <MapPin size={20} className="text-rose-500 shrink-0 mt-0.5" />
+          <div className="flex-1 text-sm">
+            <p className="font-semibold text-rose-700">Ubicación bloqueada</p>
+            <p className="text-rose-600 mt-0.5">
+              Ve a Configuración → Privacidad → Ubicación y permite el acceso a esta app.
+            </p>
+          </div>
+          <button onClick={() => setDismissed(true)} className="text-rose-400 hover:text-rose-600">
+            <X size={16} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Estado 'prompt' o 'unknown' → banner para que el repartidor active el tracking
+  return (
+    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[9999] w-[calc(100%-2rem)] max-w-sm">
+      <button
+        onClick={startWatch}
+        className="w-full flex items-center gap-3 rounded-xl bg-brand-600 text-white shadow-lg px-4 py-3 hover:bg-brand-700 active:scale-95 transition-transform"
+      >
+        <MapPin size={20} className="shrink-0" />
+        <div className="flex-1 text-left">
+          <p className="font-semibold text-sm">Activar seguimiento de ubicación</p>
+          <p className="text-xs opacity-80">Toca aquí y elige <strong>"Permitir siempre"</strong> para no volver a ver este mensaje</p>
+        </div>
+      </button>
+    </div>
+  );
 }
