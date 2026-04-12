@@ -726,14 +726,16 @@ const SalesPage = () => {
           {/* Fechas */}
           <div className="sm:mr-3">
             <DateInput
-              className="border border-gray-300 rounded-lg px-2 py-2 text-sm w-[90%] sm:w-[138px]"
+              wrapperClass="w-[90%] sm:w-[138px]"
+              className="border border-gray-300 rounded-lg px-2 py-2 text-sm"
               value={fromDate}
               onChange={(e) => { setQuickRange('range'); setFromDate(e.target.value); }}
             />
           </div>
           <div className="sm:mr-3">
             <DateInput
-              className="border border-gray-300 rounded-lg px-2 py-2 text-sm w-[90%] sm:w-[138px]"
+              wrapperClass="w-[90%] sm:w-[138px]"
+              className="border border-gray-300 rounded-lg px-2 py-2 text-sm"
               value={toDate}
               onChange={(e) => { setQuickRange('range'); setToDate(e.target.value); }}
             />
@@ -772,8 +774,8 @@ const SalesPage = () => {
             </select>
           </div>
 
-          {/* Factura (solo desktop) */}
-          <div className="hidden sm:flex items-center gap-2 sm:mr-3">
+          {/* Factura */}
+          <div className="flex items-center gap-2 sm:mr-3">
             <Receipt size={16} className="text-gray-500 hidden sm:inline" />
             <select
               className="border border-gray-300 rounded-lg px-2 py-2 text-sm bg-white w-full sm:w-[112px]"

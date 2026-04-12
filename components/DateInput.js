@@ -31,16 +31,16 @@ const CalendarIcon = () => (
   </svg>
 );
 
-export default function DateInput({ value, onChange, className = '', ...props }) {
+export default function DateInput({ value, onChange, className = '', wrapperClass = '', ...props }) {
   return (
-    <div className="relative inline-flex items-center">
+    <div className={`relative inline-flex items-center${wrapperClass ? ' ' + wrapperClass : ''}`}>
       {/* Texto visible en DD/MM/AAAA */}
       <input
         type="text"
         readOnly
         value={toDisplay(value)}
         placeholder="DD/MM/AAAA"
-        className={`pr-7 ${className}`}
+        className={`${wrapperClass ? 'w-full ' : ''}pr-7 ${className}`}
         tabIndex={-1}
       />
       {/* Ícono de calendario — posicionado a la derecha igual que el reloj en type="time" */}

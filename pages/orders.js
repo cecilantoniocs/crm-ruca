@@ -643,14 +643,16 @@ export default function Orders() {
           {/* Fechas */}
           <div className="sm:mr-3">
             <DateInput
-              className="border border-gray-300 rounded-lg px-2 py-2 text-sm w-[90%] sm:w-[138px]"
+              wrapperClass="w-[90%] sm:w-[138px]"
+              className="border border-gray-300 rounded-lg px-2 py-2 text-sm"
               value={fromDate || ''}
               onChange={(e) => { setQuickRange('range'); setFromDate(e.target.value || ''); }}
             />
           </div>
           <div className="sm:mr-3">
             <DateInput
-              className="border border-gray-300 rounded-lg px-2 py-2 text-sm w-[90%] sm:w-[138px]"
+              wrapperClass="w-[90%] sm:w-[138px]"
+              className="border border-gray-300 rounded-lg px-2 py-2 text-sm"
               value={toDate || ''}
               onChange={(e) => { setQuickRange('range'); setToDate(e.target.value || ''); }}
             />
@@ -863,6 +865,13 @@ export default function Orders() {
                     {CLP.format(Number(o.total) || 0)}
                   </div>
                 </div>
+
+                {/* Fecha de creación */}
+                {o.createdAt && (
+                  <p className="mt-2 text-[11px] text-gray-400">
+                    Creado: {fmtDateMobile(o.createdAt)}
+                  </p>
+                )}
               </div>
             );
           })}

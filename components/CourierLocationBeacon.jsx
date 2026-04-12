@@ -55,10 +55,20 @@ export default function CourierLocationBeacon() {
   return <BeaconInner />;
 }
 
+const SS_KEY = 'beaconPermState';
+
 function BeaconInner() {
   // 'unknown' | 'prompt' | 'granted' | 'denied'
-  const [permState, setPermState] = useState('unknown');
+  // Leer desde sessionStorage para no mostrar el banner en cada navegación de página
+  const [permState, setPermState] = useState(() => {
+    try { return sessionStorage.getItem(SS_KEY) || 'unknown'; } catch { return 'unknown'; }
+  });
   const [dismissed, setDismissed] = useState(false);
+
+  const savePermState = (state) => {
+    setPermState(state);
+    try { sessionStorage.setItem(SS_KEY, state); } catch {}
+  };
   const watchIdRef   = useRef(null);
   const lastPosRef   = useRef(null); // { lat, lng }
   const lastPingRef  = useRef(0);    // timestamp ms
@@ -97,13 +107,13 @@ function BeaconInner() {
 
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
-        setPermState('granted');
+        savePermState('granted');
         setDismissed(false);
         onPosition(pos);
       },
       (err) => {
         if (err.code === 1 /* PERMISSION_DENIED */) {
-          setPermState('denied');
+          savePermState('denied');
         } else {
           console.warn('[Beacon] geo error', err.code, err.message);
         }
@@ -123,21 +133,26 @@ function BeaconInner() {
   // Al montar: consultar estado del permiso sin disparar el diálogo
   useEffect(() => {
     if (!('geolocation' in navigator)) {
-      setPermState('denied');
+      savePermState('denied');
       return;
+    }
+
+    // Si sessionStorage ya indica 'granted', iniciar tracking inmediatamente sin esperar la API
+    if (permState === 'granted') {
+      startWatch();
     }
 
     navigator.permissions
       ?.query({ name: 'geolocation' })
       .then((status) => {
-        setPermState(status.state); // 'granted' | 'prompt' | 'denied'
+        savePermState(status.state); // 'granted' | 'prompt' | 'denied'
 
         // Si ya está concedido, iniciar tracking silenciosamente
         if (status.state === 'granted') startWatch();
 
         // Reaccionar si el usuario cambia el permiso desde configuración
         status.onchange = () => {
-          setPermState(status.state);
+          savePermState(status.state);
           if (status.state === 'granted') {
             startWatch();
           } else {
@@ -146,9 +161,10 @@ function BeaconInner() {
         };
       })
       .catch(() => {
-        // Navegador no soporta Permissions API (ej. Firefox antiguo)
-        // En este caso no sabemos el estado; mostramos el banner igualmente
-        setPermState('prompt');
+        // Navegador no soporta Permissions API (ej. Firefox antiguo, iOS parcial)
+        // Si ya teníamos 'granted' en sesión, intentar iniciar tracking directamente
+        if (permState === 'granted') { startWatch(); return; }
+        savePermState('prompt');
       });
 
     return () => stopWatch();
