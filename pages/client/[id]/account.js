@@ -683,23 +683,25 @@ export default function ClientAccountPage() {
       {!loading && !err && (
         <>
           {/* Header cliente */}
-          <div className="mb-6">
-            <h1 className="text-2xl font-semibold text-coffee-900">
-              {client?.local_name
-                ? `${client.local_name} · ${client?.name ?? 'Cliente'}`
-                : (client?.name ?? 'Cliente')}
+          <div className="mb-6 rounded-xl bg-gradient-to-br from-brand-400 to-brand-500 px-5 py-4 shadow-sm">
+            {client?.local_name && (
+              <p className="text-xs font-semibold uppercase tracking-widest text-brand-800 mb-0.5">
+                {client.name}
+              </p>
+            )}
+            <h1 className="text-2xl font-bold text-coffee-900 leading-tight">
+              {client?.local_name || client?.name || 'Cliente'}
             </h1>
-            <p className="text-sm text-gray-600 mt-1">
-              <span className="font-medium">Dirección:</span>{' '}
+            <p className="text-sm text-coffee-700 mt-1.5">
               {client?.dir1 || client?.address || '—'}
-              {' · '}
-              <span className="font-medium">Ciudad:</span>{' '}
-              {client?.ciudad || client?.city || '—'}
+              {(client?.ciudad || client?.city)
+                ? ` · ${client?.ciudad || client?.city}`
+                : ''}
             </p>
           </div>
 
           {/* Actividad comercial */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+          <div className="grid grid-cols-2 gap-3 mb-6">
             <div className="rounded-lg border border-gray-200 bg-white p-3">
               <div className="text-gray-500 text-sm">Ventas</div>
               <div className="text-lg font-semibold text-coffee-900">
@@ -711,15 +713,6 @@ export default function ClientAccountPage() {
               <div className="text-gray-500 text-sm">Unidades vendidas</div>
               <div className="text-lg font-semibold text-coffee-900">
                 {commercialStats.totalQty || 0}
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-gray-200 bg-white p-3">
-              <div className="text-gray-500 text-sm">Top productos</div>
-              <div className="text-sm font-semibold text-coffee-900 leading-snug break-words">
-                {commercialStats.topProducts.length > 0
-                  ? commercialStats.topProducts.join(', ')
-                  : '—'}
               </div>
             </div>
           </div>
@@ -751,7 +744,7 @@ export default function ClientAccountPage() {
             {/* Pedidos */}
             <div className="lg:col-span-1">
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-coffee-900 font-semibold">🛒 Pedidos</span>
+                <span className="text-coffee-900 font-semibold">🚚 Ventas</span>
               </div>
               <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
                 <div className="overflow-y-auto max-h-[400px] sm:max-h-none">

@@ -426,6 +426,7 @@ export default function Orders() {
     // 🔹 filtro repartidor
     const byCourier = (o) => {
       if (courierFilter === 'all') return true;
+      if (courierFilter === 'pickup') return o.isPickup === true;
       return String(o.deliveredBy || '') === String(courierFilter);
     };
 
@@ -683,6 +684,7 @@ export default function Orders() {
               title="Repartidor"
             >
               <option value="all">Todos</option>
+              <option value="pickup">🏭 Retiro en bodega</option>
               {couriers.map((u) => (
                 <option key={u.id} value={String(u.id)}>{u.name || u.email || 'Repartidor'}</option>
               ))}
