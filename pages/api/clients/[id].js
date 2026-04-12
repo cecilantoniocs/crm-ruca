@@ -50,6 +50,8 @@ function mapRow(c) {
     ownerId: c.owner_id,
     clientType: c.client_type ? String(c.client_type).toLowerCase() : null,
     clientOwner: c.client_owner,
+    createdBy: c.created_by ?? null,
+    createdByName: c.creator?.name ?? null,
     createdAt: c.created_at ?? null,
     updatedAt: c.updated_at ?? null,
   };
@@ -65,7 +67,7 @@ export default async function handler(req, res) {
 
       const { data, error } = await supabaseServer
         .from('clients')
-        .select('id,name,local_name,dir1,zona,ciudad,telefono,email,rut,razon_social,owner_id,client_type,client_owner,created_at,updated_at')
+        .select('id,name,local_name,dir1,zona,ciudad,telefono,email,rut,razon_social,owner_id,client_type,client_owner,created_by,creator:users_app!clients_created_by_fkey(name),created_at,updated_at')
         .eq('id', id)
         .maybeSingle();
 

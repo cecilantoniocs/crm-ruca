@@ -6,7 +6,7 @@ import { useFormik } from 'formik';
 import * as Yup from 'yup';
 import axiosClient from '../../config/axios';
 import Swal from 'sweetalert2';
-import { ArrowLeft, Save, Clock } from 'lucide-react';
+import { ArrowLeft, Save, Clock, User } from 'lucide-react';
 
 const fmtDateTime = (iso) => {
   if (!iso) return '—';
@@ -307,11 +307,22 @@ const EditClient = () => {
             </div>
 
             {/* Metadata */}
-            <div className="mt-6 flex items-center gap-4 border-t border-gray-100 pt-4 text-xs text-gray-400">
-              <Clock size={13} className="shrink-0" />
-              <span>Creado: <span className="text-gray-500 font-medium">{fmtDateTime(client?.createdAt)}</span></span>
+            <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-gray-100 pt-4 text-xs text-gray-400">
+              <span className="flex items-center gap-1">
+                <Clock size={13} className="shrink-0" />
+                Creado: <span className="text-gray-500 font-medium">{fmtDateTime(client?.createdAt)}</span>
+              </span>
               <span className="text-gray-200">|</span>
               <span>Modificado: <span className="text-gray-500 font-medium">{fmtDateTime(client?.updatedAt)}</span></span>
+              {client?.createdByName && (
+                <>
+                  <span className="text-gray-200">|</span>
+                  <span className="flex items-center gap-1">
+                    <User size={13} className="shrink-0" />
+                    Creado por: <span className="text-gray-500 font-medium">{client.createdByName}</span>
+                  </span>
+                </>
+              )}
             </div>
 
             <div className="mt-4 flex items-center justify-end gap-3">
