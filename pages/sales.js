@@ -293,7 +293,7 @@ const SalesPage = () => {
         toDate: toDate || undefined,
         q: searchTerm || undefined,
         owner: ownerFilter !== 'all' ? ownerFilter : undefined,
-        courierId: courierFilter !== 'all' ? courierFilter : undefined,
+        courierId: (courierFilter !== 'all' && courierFilter !== 'pickup') ? courierFilter : undefined,
         paymentMethod: paymentFilter !== 'all' ? paymentFilter : undefined,
         invoice: invoiceFilter !== 'all' ? invoiceFilter : undefined,
         paid: paidFilter !== 'all' ? paidFilter : undefined,
@@ -457,7 +457,9 @@ const SalesPage = () => {
     if (ownerFilter !== 'all') {
       rows = rows.filter((o) => norm(o.clientOwner) === ownerFilter);
     }
-    if (courierFilter !== 'all') {
+    if (courierFilter === 'pickup') {
+      rows = rows.filter((o) => o.isPickup === true);
+    } else if (courierFilter !== 'all') {
       rows = rows.filter((o) => String(o.deliveredBy) === String(courierFilter));
     }
     if (invoiceFilter !== 'all') {
@@ -766,6 +768,7 @@ const SalesPage = () => {
               title="Repartidor"
             >
               <option value="all">Todos</option>
+              <option value="pickup">🏭 Retiro en bodega</option>
               {repartidores.map((r) => (
                 <option key={r.id} value={String(r.id)}>
                   {r.name || r.email || 'Repartidor'}

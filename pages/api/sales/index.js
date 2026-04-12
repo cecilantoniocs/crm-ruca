@@ -49,7 +49,8 @@ export default async function handler(req, res) {
         paid_sum,
         remaining,
         items,
-        status
+        status,
+        is_pickup
       `)
       // Doble seguro (aunque la vista ya filtra)
       .eq('status', 'entregado')
@@ -124,7 +125,8 @@ export default async function handler(req, res) {
       paidSum:       Number(o.paid_sum ?? 0),
       remaining:     Number(o.remaining ?? 0),
       items:         Array.isArray(o.items) ? o.items : [],
-      status:        o.status, // queda disponible si lo quieres mostrar
+      status:        o.status,
+      isPickup:      o.is_pickup ?? false,
     }));
 
     res.json(rows);
