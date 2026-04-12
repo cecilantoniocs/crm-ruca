@@ -337,7 +337,7 @@ export default function ClientAccountPage() {
       const [resSales, resPayments, resCouriers] = await Promise.all([
         axiosClient
           .get('sales', { params: { clientId: c.id } })
-          .catch(async () => axiosClient.get('sales')),
+          .catch(() => ({ data: [] })),
         axiosClient
           .get('payments', { params: { clientId: c.id, include: 'items' } })
           .catch(() => ({ data: [] })),

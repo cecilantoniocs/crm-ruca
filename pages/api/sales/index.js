@@ -21,6 +21,7 @@ export default async function handler(req, res) {
     const {
       q,
       fromDate, toDate,
+      clientId,          // filtrar por cliente específico (cuenta de cliente)
       owner,             // 'cecil' | 'rucapellan'
       courierId,         // uuid
       invoice,           // 'facturado' | 'no_facturado' | 'sin_factura'
@@ -53,8 +54,14 @@ export default async function handler(req, res) {
       // Doble seguro (aunque la vista ya filtra)
       .eq('status', 'entregado')
       .order('delivery_date', { ascending: false })
-      .order('id', { ascending: false })
-      .limit(2000);
+      .order('id', { ascending: false });
+
+    // Cuando se consulta por cliente, traer TODOS sus pedidos sin límite artificial
+    if (clientId) {
+      query = query.eq('client_id', clientId);
+    } else {
+      query = query.limit(2000);
+    }
 
     // Fechas (YYYY-MM-DD)
     if (fromDate) query = query.gte('delivery_date', fromDate);
