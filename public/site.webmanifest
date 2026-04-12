@@ -1,6 +1,6 @@
 {
-  "name": "CRM Ruca",
-  "short_name": "CRM Ruca",
+  "name": "RookApp",
+  "short_name": "RookApp",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -11,13 +11,25 @@
       "src": "/icon-192-maskable.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-192-maskable.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
     },
     {
       "src": "/icon-512-maskable.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }
