@@ -754,8 +754,9 @@ export default function ClientAccountPage() {
                 <span className="text-coffee-900 font-semibold">🛒 Pedidos</span>
               </div>
               <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+                <div className="overflow-y-auto max-h-[400px] sm:max-h-none">
                 <table className="w-full table-auto">
-                  <thead className="bg-gray-50">
+                  <thead className="bg-gray-50 sticky top-0 z-10">
                     <tr className="text-left text-xs text-gray-600 uppercase">
                       <th className="px-4 py-2">Pedido</th>
                       <th className="px-4 py-2">Fecha</th>
@@ -815,6 +816,7 @@ export default function ClientAccountPage() {
                     })}
                   </tbody>
                 </table>
+                </div>
               </div>
             </div>
 
@@ -824,8 +826,9 @@ export default function ClientAccountPage() {
                 <span className="text-coffee-900 font-semibold">💳 Abonos</span>
               </div>
               <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+                <div className="overflow-y-auto max-h-[400px] sm:max-h-none">
                 <table className="w-full table-auto">
-                  <thead className="bg-gray-50">
+                  <thead className="bg-gray-50 sticky top-0 z-10">
                     <tr className="text-left text-xs text-gray-600 uppercase">
                       <th className="px-4 py-2">Pedido</th>
                       <th className="px-4 py-2">Fecha</th>
@@ -912,6 +915,7 @@ export default function ClientAccountPage() {
                     })}
                   </tbody>
                 </table>
+                </div>
               </div>
             </div>
           </div>
