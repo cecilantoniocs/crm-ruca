@@ -63,6 +63,7 @@ function mapRow(c) {
     ownerId: c.owner_id,
     clientType: c.client_type ? String(c.client_type).toLowerCase() : null,
     clientOwner: c.client_owner,
+    createdBy: c.created_by ?? null,
     createdAt: c.created_at ?? null,
     updatedAt: c.updated_at ?? null,
   };
@@ -89,7 +90,7 @@ export default async function handler(req, res) {
 
       let query = supabaseServer
         .from('clients')
-        .select('id,name,local_name,dir1,zona,ciudad,telefono,email,rut,razon_social,owner_id,client_type,client_owner,created_at,updated_at')
+        .select('id,name,local_name,dir1,zona,ciudad,telefono,email,rut,razon_social,owner_id,client_type,client_owner,created_by,created_at,updated_at')
         .order('name', { ascending: true });
 
       if (ownerId) query = query.eq('owner_id', normalizeOwnerId(ownerId));
@@ -158,6 +159,7 @@ export default async function handler(req, res) {
         owner_id: normalizeOwnerId(body.sellerId ?? body.ownerId ?? null),
         client_type: clientTypeDB,                  // DB en MAYÚSCULAS
         client_owner: clientOwner,
+        created_by: user?.id ?? null,
       };
 
       if (!insert.name) return res.status(400).json({ error: 'Falta name' });
