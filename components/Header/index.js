@@ -22,7 +22,16 @@ const Header = ({ setMenuOpen }) => {
         const parsed = JSON.parse(stored);
         setUserName(parsed?.name || '');
         const cd = parsed?.can_deliver ?? parsed?.canDeliver;
-        setCanDeliver(cd === true || String(cd).toLowerCase() === 'true');
+        const isAdmin = parsed?.is_admin ?? parsed?.isAdmin;
+        const role = (parsed?.role || '').toLowerCase();
+        // Mostrar botón de notificaciones a repartidores, admins y supervisores
+        const showPush =
+          cd === true ||
+          String(cd).toLowerCase() === 'true' ||
+          isAdmin === true ||
+          role === 'admin' ||
+          role === 'supervisor';
+        setCanDeliver(showPush);
       }
     } catch {
       setUserName('');
@@ -62,7 +71,7 @@ const Header = ({ setMenuOpen }) => {
 
         {/* Usuario + Salir bonito */}
         <div className="flex items-center gap-2">
-          {/* Botón de notificaciones push — solo para repartidores */}
+          {/* Botón de notificaciones push — repartidores, admins y supervisores */}
           {canDeliver && <PushNotificationButton />}
           {userName && (
             <div className="flex items-center gap-2 rounded-full border border-gray-200 bg-white px-2 py-1 shadow-sm">
