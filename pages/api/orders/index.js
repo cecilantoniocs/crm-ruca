@@ -2,6 +2,7 @@
 import { supabaseServer } from '@/lib/supabaseServer';
 import { getReqUser, requirePerm } from '@/server/guard';
 import { logAudit } from '@/server/audit';
+import { sendPushToUser, sendPushToRoles } from '@/lib/webpush';
 import { z } from 'zod';
 
 // ---------- Utils ----------
@@ -62,6 +63,7 @@ const postBodySchema = z.object({
   invoice: z.boolean().optional().nullable(),
   invoice_sent: z.boolean().optional().nullable(),
   paid: z.boolean().optional().nullable(),
+  is_pickup: z.boolean().optional().default(false),
   items: z.array(itemSchema).min(1, 'Debe incluir items'),
 }).transform((b) => {
   const items = b.items.map(i => {
@@ -88,6 +90,7 @@ const toCamel = (o) => ({
   invoice: o.invoice,
   invoiceSent: o.invoice_sent,
   paid: o.paid,
+  isPickup: o.is_pickup ?? false,
   createdAt: o.created_at,
   updatedAt: o.updated_at,
   items: (o.order_items || []).map(it => ({
@@ -235,12 +238,13 @@ export default async function handler(req, res) {
       const body = postBodySchema.parse(req.body || {});
 
       // 1) crear orden
+      const isPickup = body.is_pickup === true;
       const base = {
         client_id: body.client_id,
         client_name: body.client_name,
         client_local: body.client_local ?? null,
         seller_id: body.seller_id ?? user?.id ?? null,
-        delivered_by: body.delivered_by ?? null,
+        delivered_by: isPickup ? null : (body.delivered_by ?? null),
         status: body.status,
         delivery_date: body.delivery_date, // YYYY-MM-DD o null
         delivered_at: body.status === 'entregado' ? new Date().toISOString() : null,
@@ -248,6 +252,7 @@ export default async function handler(req, res) {
         invoice: body.invoice ?? false,
         invoice_sent: body.invoice_sent ?? false,
         paid: body.paid ?? false,
+        is_pickup: isPickup,
         total: Number(body.total) || 0, // INT4
       };
 
@@ -319,6 +324,25 @@ export default async function handler(req, res) {
       }
 
       await logAudit(user, { action: 'order.created', entity: 'order', entityId: orderId, description: `Pedido creado — ${body.client_name || ''}` });
+
+      // Notificaciones push (fire-and-forget)
+      const clientLabel = `${body.client_name || 'Cliente'}${body.client_local ? ` — ${body.client_local}` : ''}`;
+      if (isPickup) {
+        // Retiro en bodega → notificar a admin y supervisores
+        sendPushToRoles(['admin', 'supervisor'], {
+          title: '🏭 Retiro en Bodega',
+          body: clientLabel,
+          data: { orderId, url: '/orders' },
+        }).catch(() => {});
+      } else if (body.delivered_by) {
+        // Delivery normal → notificar solo al repartidor asignado
+        sendPushToUser(body.delivered_by, {
+          title: '📦 Nuevo pedido asignado',
+          body: clientLabel,
+          data: { orderId, url: '/orders' },
+        }).catch(() => {});
+      }
+
       return res.status(201).json(dto);
     }
 

@@ -27,6 +27,48 @@ self.addEventListener('message', (event) => {
   }
 });
 
+// ── Push Notifications ────────────────────────────────────────────────────────
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    payload = { title: 'Notificación', body: event.data?.text() || '' };
+  }
+
+  const title = payload.title || 'Notificación';
+  const options = {
+    body: payload.body || '',
+    icon: '/icon-192x192.png',
+    badge: '/icon-96x96.png',
+    data: payload.data || {},
+    vibrate: [200, 100, 200],
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Al tocar la notificación: abrir (o enfocar) la app y navegar a la URL indicada
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = event.notification.data?.url || '/';
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      // Si ya hay una pestaña abierta, enfocarla y navegar
+      for (const client of clientList) {
+        if ('focus' in client) {
+          client.focus();
+          if ('navigate' in client) client.navigate(url);
+          return;
+        }
+      }
+      // Si no hay pestaña abierta, abrir una nueva
+      return self.clients.openWindow(url);
+    })
+  );
+});
+
 // Fetch vacío (igual cuenta como SW válido para PWA)
 self.addEventListener('fetch', (event) => {
   // Aquí podrías agregar estrategia de caché si quieres (Stale-While-Revalidate, etc.)

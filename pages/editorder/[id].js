@@ -143,7 +143,7 @@ export default function EditOrder() {
         setStatus(toStatus(order.status));
         setPaymentMethod(toPayment(order.paymentMethod));
         setInvoice(Boolean(order.invoice));
-        setDeliveredBy(order.deliveredBy || '');
+        setDeliveredBy(order.isPickup ? 'PICKUP' : (order.deliveredBy ? String(order.deliveredBy) : ''));
 
         const itemsUi = Array.isArray(order.items)
           ? order.items.map((it) => ({
@@ -232,7 +232,11 @@ export default function EditOrder() {
 
   // ✨ NUEVO: opciones de Repartidor en formato react-select
   const courierOptions = useMemo(
-    () => [{ value: '', label: '— Elegir —' }, ...couriers.map((u) => ({ value: String(u.id), label: u.name || 'Usuario' }))],
+    () => [
+      { value: '', label: '— Elegir —' },
+      { value: 'PICKUP', label: '🏭 Retiro en Bodega' },
+      ...couriers.map((u) => ({ value: String(u.id), label: u.name || 'Usuario' })),
+    ],
     [couriers]
   );
 
@@ -377,7 +381,8 @@ export default function EditOrder() {
       status,
       paymentMethod, // 'efectivo' | 'transferencia' | 'cheque'
       invoice,
-      deliveredBy: deliveredBy || null,
+      isPickup: deliveredBy === 'PICKUP',
+      deliveredBy: deliveredBy === 'PICKUP' ? null : (deliveredBy || null),
       deliveryDate, // YYYY-MM-DD
       items: builtItems,
       total: builtItems.reduce((a, b) => a + Number(b.subtotal || 0), 0),
@@ -526,9 +531,9 @@ export default function EditOrder() {
                 />
               </div>
 
-              {/* Repartidor — ahora con react-select para que sea igual a los otros */}
+              {/* Despacho (repartidor o retiro en bodega) */}
               <div>
-                <label className="block text-sm font-medium text-coffee mb-1">Repartidor</label>
+                <label className="block text-sm font-medium text-coffee mb-1">Despacho</label>
                 <Select
                   options={courierOptions}
                   value={courierOptions.find((o) => o.value === String(deliveredBy || '')) || courierOptions[0]}

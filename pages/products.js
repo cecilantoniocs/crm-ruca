@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { useRouter } from 'next/router';
 import axiosClient from '../config/axios';
+import { getCurrentUser, can } from '../helpers/permissions';
 import PullToRefreshHeader from '../components/PullToRefreshHeader';
 import usePullToRefreshWindow from '../hooks/usePullToRefreshWindow';
 import {
@@ -36,6 +37,10 @@ import { CSS } from '@dnd-kit/utilities';
 
 export default function Products() {
   const router = useRouter();
+  const canEdit = useMemo(() => {
+    const me = getCurrentUser();
+    return can('products.edit', null, me);
+  }, []);
   const [products, setProducts] = useState([]);
   const [initialIds, setInitialIds] = useState([]); // para detectar cambios
   const [searchTerm, setSearchTerm] = useState('');
@@ -355,15 +360,17 @@ export default function Products() {
                       className="absolute right-0 mt-2 w-36 rounded-lg border border-gray-200 bg-white shadow-lg z-50"
                       onClick={stop}
                     >
-                      <button
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                        onClick={() => {
-                          setOpenMenuId(null);
-                          handleEdit(p.id);
-                        }}
-                      >
-                        Editar
-                      </button>
+                      {canEdit && (
+                        <button
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                          onClick={() => {
+                            setOpenMenuId(null);
+                            handleEdit(p.id);
+                          }}
+                        >
+                          Editar
+                        </button>
+                      )}
                       <button
                         className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
                         onClick={() => {
@@ -486,12 +493,14 @@ export default function Products() {
                                     className="absolute right-0 mt-2 w-36 rounded-lg border border-gray-200 bg-white shadow-lg z-50"
                                     onClick={stop}
                                   >
-                                    <button
-                                      className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
-                                      onClick={() => { setOpenMenuId(null); handleEdit(p.id); }}
-                                    >
-                                      Editar
-                                    </button>
+                                    {canEdit && (
+                                      <button
+                                        className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                                        onClick={() => { setOpenMenuId(null); handleEdit(p.id); }}
+                                      >
+                                        Editar
+                                      </button>
+                                    )}
                                     <button
                                       className="w-full text-left px-3 py-2 text-sm text-rose-600 hover:bg-rose-50"
                                       onClick={() => { setOpenMenuId(null); handleDelete(p.id); }}

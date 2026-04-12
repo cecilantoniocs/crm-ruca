@@ -20,12 +20,18 @@ export default function Document() {
           href="/favicon-16x16.png"
         />
 
+        {/* Viewport con safe-area para iPhone notch/Dynamic Island */}
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1, viewport-fit=cover"
+        />
+
         {/* iOS: icono y PWA full-screen */}
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta
           name="apple-mobile-web-app-status-bar-style"
-          content="black-translucent"
+          content="default"
         />
         <meta name="apple-mobile-web-app-title" content="CRM Ruca" />
 

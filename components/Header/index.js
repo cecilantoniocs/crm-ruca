@@ -2,10 +2,18 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { LogOut, Menu } from 'lucide-react';
+import dynamic from 'next/dynamic';
+
+// Solo se carga en el cliente (usa navigator/window)
+const PushNotificationButton = dynamic(
+  () => import('@/components/PushNotificationButton'),
+  { ssr: false }
+);
 
 const Header = ({ setMenuOpen }) => {
   const router = useRouter();
   const [userName, setUserName] = useState('');
+  const [canDeliver, setCanDeliver] = useState(false);
 
   useEffect(() => {
     try {
@@ -13,6 +21,8 @@ const Header = ({ setMenuOpen }) => {
       if (stored) {
         const parsed = JSON.parse(stored);
         setUserName(parsed?.name || '');
+        const cd = parsed?.can_deliver ?? parsed?.canDeliver;
+        setCanDeliver(cd === true || String(cd).toLowerCase() === 'true');
       }
     } catch {
       setUserName('');
@@ -28,7 +38,10 @@ const Header = ({ setMenuOpen }) => {
   const initial = (userName || 'U').trim().charAt(0).toUpperCase();
 
   return (
-    <header className="sticky top-0 z-40 bg-white/80 backdrop-blur border-b border-gray-200">
+    <header
+      className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b border-gray-200"
+      style={{ paddingTop: 'env(safe-area-inset-top)' }}
+    >
       <div className="px-4 sm:px-6 py-3 flex items-center justify-between">
         {/* Botón menú (móvil) */}
         <button
@@ -49,6 +62,8 @@ const Header = ({ setMenuOpen }) => {
 
         {/* Usuario + Salir bonito */}
         <div className="flex items-center gap-2">
+          {/* Botón de notificaciones push — solo para repartidores */}
+          {canDeliver && <PushNotificationButton />}
           {userName && (
             <div className="flex items-center gap-2 rounded-full border border-gray-200 bg-white px-2 py-1 shadow-sm">
               <div className="h-7 w-7 rounded-full bg-brand-600 text-white flex items-center justify-center text-xs font-semibold">

@@ -39,6 +39,7 @@ const toCamel = (row) => ({
   invoice: row.invoice,
   invoiceSent: row.invoice_sent,
   paid: row.paid,
+  isPickup: row.is_pickup ?? false,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   items: (row.order_items || []).map((it) => ({
@@ -80,8 +81,8 @@ const partialFromCamel = (o) => {
   if ('invoice' in o) r.invoice = !!o.invoice;
   if ('invoiceSent' in o || 'invoice_sent' in o)
     r.invoice_sent = !!(o.invoiceSent ?? o.invoice_sent);
-
   if ('paid' in o) r.paid = !!o.paid;
+  if ('isPickup' in o || 'is_pickup' in o) r.is_pickup = !!(o.isPickup ?? o.is_pickup);
 
   return r;
 };
@@ -130,6 +131,8 @@ const patchSchema = z
     seller_id: z.union([z.number().int(), z.string()]).optional(),
     deliveredBy: z.union([z.number().int(), z.string()]).optional(),
     delivered_by: z.union([z.number().int(), z.string()]).optional(),
+    isPickup: z.boolean().optional(),
+    is_pickup: z.boolean().optional(),
     status: z.enum(['pendiente', 'entregado']).optional(),
     total: z.union([z.number(), z.string()]).optional(),
     deliveryDate: z

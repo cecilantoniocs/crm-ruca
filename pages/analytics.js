@@ -37,6 +37,7 @@ const startOfMonth = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
 };
+const startOfYear = () => `${new Date().getFullYear()}-01-01`;
 
 // ── Componentes internos ───────────────────────────────────────────────────
 function Section({ title, children }) {
@@ -149,9 +150,8 @@ export default function AnalyticsPage() {
     }
   }, []);
 
-  // Sincronizar fechas cuando cambia el preset (solo si NO se cargó desde storage)
+  // Sincronizar fechas cuando cambia el preset
   useEffect(() => {
-    if (baselineSet.current) return;
     if (quickRange === 'today') {
       const t = todayYMD();
       setFrom(t); setTo(t);
@@ -159,7 +159,10 @@ export default function AnalyticsPage() {
       setFrom(startOfWeek()); setTo(todayYMD());
     } else if (quickRange === 'month') {
       setFrom(startOfMonth()); setTo(todayYMD());
+    } else if (quickRange === 'year') {
+      setFrom(startOfYear()); setTo(todayYMD());
     }
+    // 'range': el usuario ajustó las fechas manualmente, no sobreescribir
   }, [quickRange]);
 
   // Cargar lista de productos
@@ -336,6 +339,7 @@ export default function AnalyticsPage() {
               { key: 'today', label: 'Hoy' },
               { key: 'week',  label: 'Semana' },
               { key: 'month', label: 'Mes' },
+              { key: 'year',  label: 'Año' },
             ].map(({ key, label }) => (
               <button
                 key={key}
