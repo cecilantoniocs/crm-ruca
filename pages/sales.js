@@ -1,67 +1,175 @@
-// pages/sales.js
-import React, { useEffect, useMemo, useState } from 'react';
+// /pages/sales.js
+// Rework: método de pago con toggle, header móvil (local arriba, persona abajo + ícono cuenta),
+// KPIs avanzados detrás del permiso sales.kpis.view y "Total" -> "Ingresos".
+// Fixes: gating por permisos + payload camelCase+snake_case para parches robustos.
+// + Filtros persistentes con botón de disquete (localStorage sales.filters.v1)
+
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import Layout from '../components/Layout';
+import DateInput from '../components/DateInput';
 import { useRouter } from 'next/router';
 import axiosClient from '../config/axios';
 import {
   Search,
-  Calendar,
   CalendarRange,
-  Navigation,
+  Receipt,
+  DollarSign,
   Truck,
   Users as UsersIcon,
+  ExternalLink,
+  CreditCard,
+  Save,
+  Check,
 } from 'lucide-react';
 
-// ==== Helpers ===============================================================
-const statusToString = (val) => {
-  if (val == null) return '';
-  if (typeof val === 'string') return val.trim().toLowerCase();
-  if (typeof val === 'object') {
-    if ('value' in val) return String(val.value).trim().toLowerCase();
-    if ('label' in val) return String(val.label).trim().toLowerCase();
-  }
-  return String(val).trim().toLowerCase();
+import PullToRefreshHeader from '../components/PullToRefreshHeader';
+import usePullToRefreshWindow from '../hooks/usePullToRefreshWindow';
+import { getCurrentUser, can, isAdmin } from '../helpers/permissions';
+
+// ---------- Supabase REST client (lectura vistas) ----------
+const supa = (() => {
+  const baseURL = process.env.NEXT_PUBLIC_SUPABASE_URL
+    ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1`
+    : '';
+  return axiosClient.create
+    ? axiosClient.create({
+        baseURL,
+        headers: {
+          apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+        },
+      })
+    : require('axios').create({
+        baseURL,
+        headers: {
+          apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+        },
+      });
+})();
+
+// ---------- utils ----------
+const norm = (v) => (v ?? '').toString().trim().toLowerCase();
+const startOfDay = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x; };
+const endOfDay   = (d) => { const x = new Date(d); x.setHours(23,59,59,999); return x; };
+
+// YYYY-MM-DD en HORA LOCAL (no usar toISOString() para evitar desfase)
+const toYMDLocal = (d) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 };
 
-const startOfDay = (d) => {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
+const fmtDateDMY = (isoOrYmd) => {
+  if (!isoOrYmd) return '—';
+  const s = String(isoOrYmd).slice(0, 10);
+  const [yyyy, mm, dd] = s.split('-');
+  if (!yyyy || !mm || !dd) return '—';
+  return `${dd}/${mm}/${yyyy}`;
 };
-const endOfDay = (d) => {
-  const x = new Date(d);
-  x.setHours(23, 59, 59, 999);
-  return x;
+const fmtDateMobile = (isoOrYmd) => {
+  if (!isoOrYmd) return '—';
+  const s = String(isoOrYmd).slice(0, 10);
+  const [yyyy, mm, dd] = s.split('-').map((x) => x && x.padStart(2, '0'));
+  if (!yyyy || !mm || !dd) return '—';
+  const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  const mIdx = Math.max(0, Math.min(11, Number(mm) - 1));
+  return `${Number(dd)} ${meses[mIdx]} ${yyyy}`;
 };
 
-const labelSocio = (user) => {
-  if (!user) return '—';
-  return user.partnerTag ? String(user.partnerTag).toUpperCase() : (user.name || '—');
+// pills estilos compartidos
+const pillCls = 'inline-flex items-center rounded-full ring-1 font-medium';
+const ownerPill = (o, size = 'md') => {
+  const v = norm(o);
+  const label = v === 'cecil' ? 'Cecil' : v === 'rucapellan' ? 'Rucapellan' : '—';
+  const color =
+    v === 'rucapellan'
+      ? 'bg-rose-50 text-rose-700 ring-rose-200'
+      : v === 'cecil'
+      ? 'bg-sky-50 text-sky-700 ring-sky-200'
+      : 'bg-gray-50 text-gray-700 ring-gray-200';
+  const sizing = size === 'sm' ? 'px-2 py-0.5 text-[11px]' : 'px-2.5 py-1 text-xs';
+  return <span className={`${pillCls} ${color} ${sizing}`}>{label}</span>;
 };
 
-// ===== Pills: UNA sola base para que TODAS midan igual ======================
-// ⬇⬇⬇ AQUÍ está el tamaño de fuente de las pills: `text-xs` (12px) ⬇⬇⬇
-const PILL =
-  'inline-flex items-center justify-center h-6 px-2 rounded-full text-xs leading-none ring-1 font-medium whitespace-nowrap';
-
-// Método de pago (display)
+// método de pago
 const paymentToString = (val) => {
-  if (!val) return 'efectivo';
-  const v = String(val).trim().toLowerCase();
-  return v === 'transferencia' ? 'transferencia' : 'efectivo';
+  const v = norm(val);
+  if (v === 'transferencia') return 'transferencia';
+  if (v === 'cheque') return 'cheque';
+  return 'efectivo';
 };
-const PaymentPill = ({ value }) => {
+const PaymentPill = ({ value, size = 'md' }) => {
   const v = paymentToString(value);
+  const label =
+    v === 'transferencia' ? 'Transferencia' :
+    v === 'cheque'        ? 'Cheque' :
+                            'Efectivo';
+
   const color =
     v === 'transferencia'
-      ? 'bg-brand-50 text-brand-700 ring-brand-200'
+      ? 'bg-amber-50 text-amber-700 ring-amber-200'
+      : v === 'cheque'
+      ? 'bg-violet-50 text-violet-700 ring-violet-200'
       : 'bg-sky-50 text-sky-700 ring-sky-200';
-  return <span className={`${PILL} ${color}`}>{v === 'transferencia' ? 'Transferencia' : 'Efectivo'}</span>;
+
+  const sizing = size === 'sm' ? 'px-2 py-0.5 text-[11px]' : 'px-2.5 py-1 text-xs';
+
+  return <span className={`${pillCls} ${color} ${sizing}`}>{label}</span>;
 };
 
-// ==== Page ==================================================================
+// Número de venta / pedido
+const formatOrderNumberRaw = (o) => {
+  if (o?.orderNumber != null && o.orderNumber !== '') {
+    const n = String(o.orderNumber).replace(/\D/g, '');
+    return '#' + String(n).padStart(4, '0');
+  }
+  if (o?.id) return '#' + String(o.id).slice(0, 4).toUpperCase();
+  return '—';
+};
+
+// Etiqueta estilo negro
+const OrderNumberTag = ({ order }) => (
+  <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-gray-900 text-white">
+    {formatOrderNumberRaw(order)}
+  </span>
+);
+
+// helpers toggle
+const nextPaymentMethod = (curr) => {
+  const v = paymentToString(curr);
+  if (v === 'efectivo') return 'transferencia';
+  if (v === 'transferencia') return 'cheque';
+  return 'efectivo';
+};
+
+// Helper: fusiona camelCase + snake_case para compatibilidad backend
+const withSnake = (obj = {}, extra = {}) => {
+  const out = { ...obj, ...extra };
+  if ('paymentMethod' in obj) out.payment_method = obj.paymentMethod;
+  if ('invoiceSent'   in obj) out.invoice_sent   = obj.invoiceSent;
+  if ('clientOwner'   in obj) out.client_owner   = obj.clientOwner;
+  if ('deliveredBy'   in obj) out.delivered_by   = obj.deliveredBy;
+  return out;
+};
+
+// ------------ componente ------------
 const SalesPage = () => {
   const router = useRouter();
+
+  // permisos
+  const me = useMemo(() => getCurrentUser(), []);
+  const canViewSales = useMemo(() => isAdmin(me) || can('sales.view', null, me), [me]);
+  const canViewKpis  = useMemo(
+    () => isAdmin(me) || can('sales.kpis.view', null, me) || can('sales.kpis', null, me),
+    [me]
+  );
+
+  // acciones granulares
+  const canMarkPaid     = useMemo(() => isAdmin(me) || can('sales.markPaid', null, me), [me]);
+  const canUpdatePayMet = useMemo(() => isAdmin(me) || can('sales.updatePayment', null, me), [me]);
+  const canUpdateInv    = useMemo(() => isAdmin(me) || can('sales.updateInvoice', null, me), [me]);
 
   // Datos
   const [orders, setOrders] = useState([]);
@@ -77,34 +185,139 @@ const SalesPage = () => {
   const [quickRange, setQuickRange] = useState('month'); // 'today' | 'week' | 'month' | 'range'
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
-  const [partnerFilter, setPartnerFilter] = useState('all');
-  const [courierFilter, setCourierFilter] = useState('all');
 
-  const oDate = (o) => o.deliveredAt || o.deliveryDate || o.createdAt || '';
+  // cartera, repartidor, método de pago
+  const [ownerFilter, setOwnerFilter] = useState('all'); // 'all' | 'rucapellan' | 'cecil'
+  const [courierFilter, setCourierFilter] = useState('all'); // 'all' | <courierId>
+  const [paymentFilter, setPaymentFilter] = useState('all'); // 'all' | 'efectivo' | 'transferencia' | 'cheque'
 
-  // Cargar
+  // nuevos filtros
+  const [invoiceFilter, setInvoiceFilter] = useState('all'); // 'all' | 'facturado' | 'no_facturado' | 'sin_factura'
+  const [paidFilter, setPaidFilter] = useState('all'); // 'all' | 'pagado' | 'no_pagado'
+
+  const oDate = (o) => o.deliveryDate || '';
+  const [openInvoiceId, setOpenInvoiceId] = useState(null);
+
+  const { headerProps } = usePullToRefreshWindow({ onRefresh: () => refetch(), threshold: 60 });
+
+  // ====== Persistencia de filtros (disquete) ======
+  const FILTERS_KEY = 'sales.filters.v1';
+  const currentFilters = useMemo(() => ({
+    searchTerm,
+    quickRange,
+    fromDate,
+    toDate,
+    ownerFilter,
+    courierFilter,
+    paymentFilter,
+    invoiceFilter,
+    paidFilter,
+  }), [searchTerm, quickRange, fromDate, toDate, ownerFilter, courierFilter, paymentFilter, invoiceFilter, paidFilter]);
+
+  const [savedFilters, setSavedFilters] = useState(null);
+  const [justSaved, setJustSaved] = useState(false);
+  const baselineSet = useRef(false);
+
+  // Cargar filtros guardados al montar (si existen)
   useEffect(() => {
-    (async () => {
-      try {
-        setLoading(true);
-        setLoadError('');
-
-        const resO = await axiosClient.get('sales');
-        setOrders(resO?.data ?? []);
-
-        const resC = await axiosClient.get('clients');
-        setClients(resC?.data ?? []);
-
-        const resU = await axiosClient.get('users');
-        setUsers(resU?.data ?? []);
-      } catch (e) {
-        console.error(e);
-        setLoadError('Error al cargar ventas.');
-      } finally {
-        setLoading(false);
+    try {
+      const raw = typeof window !== 'undefined' ? localStorage.getItem(FILTERS_KEY) : null;
+      if (!raw) return;
+      const f = JSON.parse(raw);
+      if (f && typeof f === 'object') {
+        if (f.searchTerm != null) setSearchTerm(String(f.searchTerm));
+        if (f.quickRange) setQuickRange(f.quickRange);
+        if (f.fromDate) setFromDate(f.fromDate);
+        if (f.toDate) setToDate(f.toDate);
+        if (f.ownerFilter) setOwnerFilter(f.ownerFilter);
+        if (f.courierFilter) setCourierFilter(f.courierFilter);
+        if (f.paymentFilter) setPaymentFilter(f.paymentFilter);
+        if (f.invoiceFilter) setInvoiceFilter(f.invoiceFilter);
+        if (f.paidFilter) setPaidFilter(f.paidFilter);
+        setSavedFilters({
+          searchTerm: f.searchTerm ?? '',
+          quickRange: f.quickRange ?? 'month',
+          fromDate: f.fromDate ?? '',
+          toDate: f.toDate ?? '',
+          ownerFilter: f.ownerFilter ?? 'all',
+          courierFilter: f.courierFilter ?? 'all',
+          paymentFilter: f.paymentFilter ?? 'all',
+          invoiceFilter: f.invoiceFilter ?? 'all',
+          paidFilter: f.paidFilter ?? 'all',
+        });
+        baselineSet.current = true; // ya hay baseline desde storage
       }
-    })();
+    } catch (e) {
+      console.warn('No se pudieron cargar filtros guardados', e);
+    }
   }, []);
+
+  // Si no hay baseline guardado, lo creamos cuando ya existan fechas (quickRange aplicado)
+  useEffect(() => {
+    if (baselineSet.current) return;
+    if (!fromDate || !toDate) return;
+    setSavedFilters({ ...currentFilters });
+    baselineSet.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromDate, toDate]);
+
+  // Muestra disquete si no hay baseline o si hay diferencias
+  const isDirty = useMemo(() => {
+    if (!savedFilters) return true;
+    try {
+      return JSON.stringify(savedFilters) !== JSON.stringify(currentFilters);
+    } catch {
+      return true;
+    }
+  }, [savedFilters, currentFilters]);
+
+  const saveFilters = useCallback(() => {
+    try {
+      localStorage.setItem(FILTERS_KEY, JSON.stringify(currentFilters));
+      setSavedFilters(currentFilters);
+      setJustSaved(true);
+      setTimeout(() => setJustSaved(false), 1200);
+    } catch (e) {
+      alert('No se pudieron guardar los filtros.');
+    }
+  }, [currentFilters]);
+
+  // --- fetch server-side desde /api/sales ---
+  const refetch = useCallback(async () => {
+    try {
+      setLoading(true);
+      setLoadError('');
+
+      const params = {
+        fromDate: fromDate || undefined,
+        toDate: toDate || undefined,
+        q: searchTerm || undefined,
+        owner: ownerFilter !== 'all' ? ownerFilter : undefined,
+        courierId: courierFilter !== 'all' ? courierFilter : undefined,
+        paymentMethod: paymentFilter !== 'all' ? paymentFilter : undefined,
+        invoice: invoiceFilter !== 'all' ? invoiceFilter : undefined,
+        paid: paidFilter !== 'all' ? paidFilter : undefined,
+        status: 'entregado', // el backend igual lo fuerza
+      };
+
+      const [resSales, resClients, resUsers] = await Promise.all([
+        axiosClient.get('sales', { params }),
+        axiosClient.get('clients'),
+        axiosClient.get('users'),
+      ]);
+
+      setOrders(Array.isArray(resSales?.data) ? resSales.data : []);
+      setClients(resClients?.data ?? []);
+      setUsers(resUsers?.data ?? []);
+    } catch (e) {
+      console.error(e);
+      setLoadError('Error al cargar ventas.');
+    } finally {
+      setLoading(false);
+    }
+  }, [fromDate, toDate, searchTerm, ownerFilter, courierFilter, paymentFilter, invoiceFilter, paidFilter]);
+
+  useEffect(() => { refetch(); }, [refetch]);
 
   // Maps
   const clientMap = useMemo(() => {
@@ -119,25 +332,29 @@ const SalesPage = () => {
     return m;
   }, [users]);
 
+  // Repartidores
   const repartidores = useMemo(
-    () => users.filter((u) => String(u.role || '').toLowerCase() === 'repartidor'),
+    () =>
+      users.filter((u) => {
+        const role = norm(u.role);
+        const canDeliver = !!u.can_deliver;
+        return role === 'repartidor' || canDeliver;
+      }),
     [users]
   );
 
-  const socioOptions = [{ id: 'all', label: 'Todos' }];
-
-  // Rango auto
+  // Rango auto (YYYY-MM-DD)
   useEffect(() => {
     if (quickRange === 'range') return;
     const now = new Date();
     let start;
-    const end = endOfDay(now);
+    let end = endOfDay(now);
 
     if (quickRange === 'today') {
       start = startOfDay(now);
     } else if (quickRange === 'week') {
       const d = new Date(now);
-      const day = (d.getDay() + 6) % 7;
+      const day = (d.getDay() + 6) % 7; // lunes
       const monday = new Date(d);
       monday.setDate(d.getDate() - day);
       start = startOfDay(monday);
@@ -146,9 +363,8 @@ const SalesPage = () => {
       start = startOfDay(first);
     }
 
-    const toISODate = (d) => d.toISOString().slice(0, 10);
-    setFromDate(toISODate(start));
-    setToDate(toISODate(end));
+    setFromDate(toYMDLocal(start));
+    setToDate(toYMDLocal(end));
   }, [quickRange]);
 
   const CLP = useMemo(
@@ -156,240 +372,471 @@ const SalesPage = () => {
     []
   );
 
-  // Filtrado
+  // ---- refrescar UNA orden post-PATCH ----
+  const refreshOneFromView = useCallback(async (id) => {
+    try {
+      const qs = new URLSearchParams();
+      qs.set('select', [
+        'id','total','paid','delivery_date','client_id','client_name','client_local',
+        'delivered_by','payment_method','invoice','invoice_sent','client_owner',
+        'paid_sum','remaining','items','status'
+      ].join(','));
+      qs.set('id', `eq.${id}`);
+
+      // misma vista (ya filtrada a entregados en el servidor)
+      const res = await supa.get(`/sales_with_payments_items?${qs.toString()}`);
+      const fresh = Array.isArray(res?.data) ? res.data[0] : null;
+
+      if (!fresh || fresh.id == null) {
+        refetch();
+        return;
+      }
+
+      const normalized = {
+        id:           fresh.id,
+        total:        fresh.total,
+        paid:         fresh.paid,
+        deliveryDate: fresh.delivery_date,
+        clientId:     fresh.client_id,
+        clientName:   fresh.client_name,
+        clientLocal:  fresh.client_local,
+        deliveredBy:  fresh.delivered_by,
+        paymentMethod:fresh.payment_method,
+        invoice:      fresh.invoice,
+        invoiceSent:  fresh.invoice_sent,
+        clientOwner:  fresh.client_owner,
+        paidSum:      Number(fresh.paid_sum ?? 0),
+        remaining:    Number(
+          fresh.remaining ??
+          Math.max(
+            0,
+            (Number(fresh.total) || 0) - (Number(fresh.paid_sum) || 0)
+          )
+        ),
+        items: Array.isArray(fresh.items) ? fresh.items : [],
+        status: fresh.status,
+      };
+
+      setOrders((prev) => prev.map((o) => (o.id === id ? normalized : o)));
+    } catch (err) {
+      console.error('refreshOneFromView error', err);
+      refetch();
+    }
+  }, [refetch]);
+
+  // Filtrado (ya viene ENTREGADO desde el API; no se filtra por status aquí)
   const filtered = useMemo(() => {
     let rows = orders;
 
-    const q = searchTerm.trim().toLowerCase();
-    if (q) {
+    const qRaw = searchTerm.trim().toLowerCase();
+    if (qRaw) {
+      const qDigits = qRaw.replace(/\D/g, '');
       rows = rows.filter((o) => {
         const client = (o.clientName || '').toLowerCase();
         const local = (o.clientLocal || '').toLowerCase();
-        return client.includes(q) || local.includes(q);
+        let byNumber = false;
+        if (qDigits) {
+          if (o?.orderNumber != null && o.orderNumber !== '') {
+            const onum = String(o.orderNumber).replace(/\D/g, '');
+            if (onum.includes(qDigits)) byNumber = true;
+          } else if (o?.id) {
+            byNumber = String(o.id).toLowerCase().includes(qRaw);
+          }
+        }
+        return byNumber || client.includes(qRaw) || local.includes(qRaw);
       });
     }
 
     if (fromDate && toDate) {
-      const from = new Date(fromDate + 'T00:00:00');
-      const to = new Date(toDate + 'T23:59:59');
       rows = rows.filter((o) => {
-        const d = new Date(oDate(o));
-        return d >= from && d <= to;
+        const dYMD = String(oDate(o) || '').slice(0, 10);
+        return dYMD >= fromDate && dYMD <= toDate;
       });
     }
 
-    if (partnerFilter !== 'all') {
-      rows = rows.filter((o) => {
-        const c = clientMap.get(o.clientId);
-        const ownerId = c?.ownerId || c?.sellerId || null;
-        return ownerId === partnerFilter;
-      });
+    if (ownerFilter !== 'all') {
+      rows = rows.filter((o) => norm(o.clientOwner) === ownerFilter);
     }
-
     if (courierFilter !== 'all') {
-      rows = rows.filter((o) => o.deliveredBy === courierFilter);
+      rows = rows.filter((o) => String(o.deliveredBy) === String(courierFilter));
+    }
+    if (invoiceFilter !== 'all') {
+      if (invoiceFilter === 'facturado') {
+        rows = rows.filter((o) => !!o.invoice && !!o.invoiceSent);
+      } else if (invoiceFilter === 'no_facturado') {
+        rows = rows.filter((o) => !!o.invoice && !o.invoiceSent);
+      } else if (invoiceFilter === 'sin_factura') {
+        rows = rows.filter((o) => !o.invoice);
+      }
+    }
+    if (paidFilter !== 'all') {
+      rows = rows.filter((o) => (paidFilter === 'pagado' ? !!o.paid : !o.paid));
+    }
+    if (paymentFilter !== 'all') {
+      rows = rows.filter((o) => paymentToString(o.paymentMethod) === paymentFilter);
     }
 
     return rows;
-  }, [orders, searchTerm, fromDate, toDate, partnerFilter, courierFilter, clientMap]);
+  }, [orders, searchTerm, fromDate, toDate, ownerFilter, courierFilter, invoiceFilter, paidFilter, paymentFilter]);
 
+  // Totales
   const totals = useMemo(() => {
     const count = filtered.length;
     const sum = filtered.reduce((acc, o) => acc + (Number(o.total) || 0), 0);
     const unpaid = filtered.filter((o) => !o.paid).length;
-    const invoiced = filtered.filter((o) => !!o.invoice && o.invoiceSent).length;
-    return { count, sum, unpaid, invoiced };
+    const unpaidAmount = filtered.reduce((acc, o) => acc + (Number(o.remaining) || 0), 0);
+    const noInvoiced = filtered.filter((o) => !!o.invoice && !o.invoiceSent).length;
+    const products = filtered.reduce(
+      (acc, o) => acc + ((o.items ?? []).reduce((s, it) => s + (Number(it.qty) || 0), 0)),
+      0
+    );
+
+    return {
+      count,
+      sum,
+      unpaid,
+      unpaidAmount,
+      noInvoiced,
+      products,
+    };
   }, [filtered]);
 
+  // Helpers patch
   const applyLocal = (id, patch) =>
     setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, ...patch } : o)));
 
+  // Toggle pagado/no pagado
+  // ✅ Repara borrado de abonos al pasar a "No pagado"
   const togglePaid = async (id) => {
+    if (!canMarkPaid) return;
     const prev = orders.find((o) => o.id === id);
     if (!prev) return;
-    const patch = { paid: !prev.paid };
-    applyLocal(id, patch);
+
+    const newPaid = !prev.paid;
+
+    // Optimista para KPIs
+    if (!newPaid) {
+      applyLocal(id, { paid: false, paidSum: 0, remaining: Number(prev.total) || 0 });
+    } else {
+      applyLocal(id, { paid: true, remaining: 0 });
+    }
+
     try {
-      await axiosClient.patch(`orders/${id}`, patch);
+      const payload = newPaid
+        // Al marcar pagado: crea abono automático con el método actual
+        ? withSnake({ paid: true, paymentMethod: paymentToString(prev.paymentMethod) }, { action: 'mark_paid' })
+        // Al marcar NO pagado: borra todos los abonos (flag que espera tu API)
+        : withSnake({ paid: false }, { wipePayments: true, action: 'mark_paid' });
+
+      await axiosClient.patch(`orders/${id}`, payload);
+      await refreshOneFromView(id);
     } catch (e) {
       console.error(e);
-      applyLocal(id, { paid: prev.paid });
+      // Revertir si falla
+      applyLocal(id, { paid: prev.paid, paidSum: prev.paidSum, remaining: prev.remaining });
       alert('No se pudo actualizar "Pago".');
     }
   };
 
-  const toggleInvoiceSent = async (id) => {
+  // Toggle cíclico método de pago
+  const cyclePayment = async (id) => {
+    if (!canUpdatePayMet) return;
+    const prev = orders.find((o) => o.id === id);
+    if (!prev) return;
+    const next = nextPaymentMethod(prev.paymentMethod);
+
+    // Optimista
+    applyLocal(id, { paymentMethod: next });
+
+    try {
+      await axiosClient.patch(`orders/${id}`, withSnake({ paymentMethod: next }, { action: 'update_payment' }));
+      await refreshOneFromView(id);
+    } catch (e) {
+      console.error(e);
+      // revert
+      applyLocal(id, { paymentMethod: prev.paymentMethod });
+      alert('No se pudo actualizar el método de pago.');
+    }
+  };
+
+  const updateInvoiceStatus = async (id, state) => {
+    if (!canUpdateInv) return;
     const prev = orders.find((o) => o.id === id);
     if (!prev) return;
 
-    if (!prev.invoice) {
-      if (prev.invoiceSent) {
-        applyLocal(id, { invoiceSent: false });
-        try {
-          await axiosClient.patch(`orders/${id}`, { invoiceSent: false });
-        } catch (e) {
-          console.error(e);
-          applyLocal(id, { invoiceSent: true });
-        }
-      }
-      return;
+    let patch;
+    if (state === 'sin_factura') {
+      patch = { invoice: false, invoiceSent: false };
+    } else if (state === 'no_facturada') {
+      patch = { invoice: true, invoiceSent: false };
+    } else {
+      patch = { invoice: true, invoiceSent: true };
     }
 
-    const patch = { invoiceSent: !prev.invoiceSent };
     applyLocal(id, patch);
     try {
-      await axiosClient.patch(`orders/${id}`, patch);
+      await axiosClient.patch(
+        `orders/${id}`,
+        withSnake(patch, { action: 'update_invoice' })
+      );
+      await refreshOneFromView(id);
     } catch (e) {
       console.error(e);
-      applyLocal(id, { invoiceSent: prev.invoiceSent });
-      alert('No se pudo actualizar "Factura".');
+      applyLocal(id, { invoice: prev.invoice, invoiceSent: prev.invoiceSent });
+      alert('No se pudo actualizar la factura.');
     }
   };
 
-  const mapsUrl = (addr) =>
-    `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr || '')}`;
+  // Toggle rápido SOLO móvil: Facturada <-> No facturada (bloqueado si Sin factura)
+  const toggleInvoiceMobile = async (id) => {
+    if (!canUpdateInv) return;
+    const prev = orders.find((o) => o.id === id);
+    if (!prev) return;
+    if (!prev.invoice) return; // Sin factura => bloqueado
 
-  const fmtDate = (iso) => {
-    if (!iso) return '—';
+    const next = { invoice: true, invoiceSent: !prev.invoiceSent };
+
+    // Optimista
+    applyLocal(id, next);
     try {
-      const d = new Date(iso);
-      return new Intl.DateTimeFormat('es-CL', { year: 'numeric', month: 'short', day: '2-digit' }).format(d);
-    } catch {
-      return '—';
+      await axiosClient.patch(`orders/${id}`, withSnake(next, { action: 'update_invoice' }));
+      await refreshOneFromView(id);
+    } catch (e) {
+      console.error(e);
+      applyLocal(id, { invoice: prev.invoice, invoiceSent: prev.invoiceSent });
+      alert('No se pudo actualizar la factura.');
     }
   };
 
-  // ==== UI ==================================================================
+  const fmtDateShort = (iso) => fmtDateDMY(iso);
+
+  const invoiceView = (o, size = 'md') => {
+    const hasInv = !!o.invoice;
+    const sent = !!o.invoiceSent;
+    const label = hasInv ? (sent ? 'Facturada' : 'No facturada') : 'Sin factura';
+    const color = hasInv
+      ? sent
+        ? 'bg-orange-50 text-orange-700 ring-orange-200'
+        : 'bg-violet-50 text-violet-700 ring-violet-200'
+      : 'bg-gray-50 text-gray-500 ring-gray-200';
+    const sizing = size === 'sm' ? 'px-2 py-0.5 text-[11px]' : 'px-2.5 py-1 text-xs';
+    return { label, cls: `${pillCls} ${color} ${sizing}` };
+  };
+
+  const paidPillCls = (paid, size = 'md') => {
+    const color = paid
+      ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+      : 'bg-rose-50 text-rose-700 ring-rose-200';
+    const sizing = size === 'sm' ? 'px-2 py-0.5 text-[11px]' : 'px-2.5 py-1 text-xs';
+    return `${pillCls} ${color} ${sizing}`;
+  };
+
+  const goClientAccount = (clientId) => {
+    if (!clientId) return;
+    router.push(`/client/${clientId}/account`);
+  };
+
+  useEffect(() => {
+    const close = () => {
+      setOpenInvoiceId(null);
+    };
+    const onDocDown = () => close();
+    document.addEventListener('pointerdown', onDocDown);
+    return () => document.removeEventListener('pointerdown', onDocDown);
+  }, []);
+
+  const stopPD = (e) => e.stopPropagation();
+
   return (
     <Layout>
-      {/* Header + KPIs */}
-      <div className="mb-6 space-y-3 sm:space-y-0 sm:flex sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-coffee tracking-tight">
-            Panel de <span className="text-brand-600">Ventas</span>
-          </h1>
-        </div>
+      <PullToRefreshHeader {...headerProps} />
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
-            <div className="text-gray-500">Ventas</div>
-            <div className="font-semibold text-coffee">{totals.count}</div>
+      {/* Header + KPIs */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
+        <h1 className="text-3xl font-bold text-coffee tracking-tight">
+          Panel de <span className="text-brand-600">Ventas</span>
+        </h1>
+
+        {canViewSales && (
+          <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
+            {/* Básicos */}
+            <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+              <div className="text-gray-500">Ventas</div>
+              <div className="font-semibold text-coffee-900">{totals.count}</div>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+              <div className="text-gray-500">Productos vendidos</div>
+              <div className="font-semibold text-coffee-900">{totals.products}</div>
+            </div>
+
+            {/* Avanzados */}
+            {canViewKpis && (
+              <>
+                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+                  <div className="text-gray-500">No pagadas</div>
+                  <div className="font-semibold text-rose-700">{totals.unpaid}</div>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+                  <div className="text-gray-500">No facturadas</div>
+                  <div className="font-semibold text-rose-700">{totals.noInvoiced}</div>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+                  <div className="text-gray-500">Total por cobrar</div>
+                  <div className="font-semibold text-rose-700">{CLP.format(totals.unpaidAmount)}</div>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+                  <div className="text-gray-500">Ingresos</div>
+                  <div className="font-semibold text-coffee-900">{CLP.format(totals.sum)}</div>
+                </div>
+              </>
+            )}
           </div>
-          <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
-            <div className="text-gray-500">Total</div>
-            <div className="font-semibold text-coffee">{CLP.format(totals.sum)}</div>
-          </div>
-          <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
-            <div className="text-gray-500">Por cobrar</div>
-            <div className="font-semibold text-rose-700">{totals.unpaid}</div>
-          </div>
-          <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
-            <div className="text-gray-500">Facturadas</div>
-            <div className="font-semibold text-brand-700">{totals.invoiced}</div>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Filtros */}
-      <div className="mb-4 space-y-3">
-        {/* Buscador */}
-        <div className="relative w-full">
-          <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
-          <input
-            type="text"
-            placeholder="Buscar por cliente o local…"
-            className="pl-10 pr-4 py-2 w-full rounded-lg border border-gray-300 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
-
-        {/* Fila de controles */}
-        <div className="w-full flex flex-wrap items-center gap-2">
-          {/* Botonera rango */}
-          <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden shrink-0">
-            <button
-              className={`px-3 py-2 text-sm ${quickRange === 'today' ? 'bg-gray-900 text-white' : 'bg-white hover:bg-gray-50'}`}
-              onClick={() => setQuickRange('today')}
-              type="button"
-            >
-              Hoy
-            </button>
-            <button
-              className={`px-3 py-2 text-sm ${quickRange === 'week' ? 'bg-gray-900 text-white' : 'bg-white hover:bg-gray-50'}`}
-              onClick={() => setQuickRange('week')}
-              type="button"
-            >
-              Semana
-            </button>
-            <button
-              className={`px-3 py-2 text-sm ${quickRange === 'month' ? 'bg-gray-900 text-white' : 'bg-white hover:bg-gray-50'}`}
-              onClick={() => setQuickRange('month')}
-              type="button"
-            >
-              Mes
-            </button>
-            <button
-              className={`px-3 py-2 text-sm ${quickRange === 'range' ? 'bg-gray-900 text-white' : 'bg-white hover:bg-gray-50'}`}
-              onClick={() => setQuickRange('range')}
-              type="button"
-              title="Rango"
-            >
-              <CalendarRange size={16} className="inline -mt-0.5" />
-            </button>
-          </div>
-
-          {/* Rango manual: inputs más anchos pero sin desbordar */}
-          <div className="flex items-center gap-2 flex-none">
-            <Calendar size={16} className="text-gray-500 shrink-0" />
-            <input
-              type="date"
-              className="border border-gray-300 rounded-lg px-2 py-1 text-sm w-[150px] sm:w-[170px] shrink-0"
-              value={fromDate}
-              onChange={(e) => {
-                setQuickRange('range');
-                setFromDate(e.target.value);
-              }}
-            />
-            <span className="text-gray-500 text-xs shrink-0">a</span>
-            <input
-              type="date"
-              className="border border-gray-300 rounded-lg px-2 py-1 text-sm w-[150px] sm:w-[170px] shrink-0"
-              value={toDate}
-              onChange={(e) => {
-                setQuickRange('range');
-                setToDate(e.target.value);
-              }}
-            />
-          </div>
-
-          {/* Selects Socio + Repartidor — grid 2 columnas, mismo ancho */}
-          <div className="grid grid-cols-2 gap-2 w-full sm:w-auto">
-            <div className="flex items-center gap-2 min-w-[170px]">
-              <UsersIcon size={16} className="text-gray-500 shrink-0" />
-              <select
-                className="border border-gray-300 rounded-lg px-2 py-1 text-sm bg-white w-full"
-                value={partnerFilter}
-                onChange={(e) => setPartnerFilter(e.target.value)}
-              >
-                {socioOptions.map((s) => (
-                  <option key={s.id} value={s.id}>{s.label}</option>
-                ))}
-              </select>
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 mb-6">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-end">
+          {/* Buscador */}
+          <div className="col-span-2 sm:mr-3">
+            <div className="relative w-full sm:w-[300px]">
+              <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
+              <input
+                type="text"
+                placeholder="Buscar por #venta, cliente o local…"
+                className="pl-10 pr-4 py-2 w-full rounded-lg border border-gray-300 shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600 text-sm"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
             </div>
+          </div>
 
-            <div className="flex items-center gap-2 min-w-[170px]">
-              <Truck size={16} className="text-gray-500 shrink-0" />
-              <select
-                className="border border-gray-300 rounded-lg px-2 py-1 text-sm bg-white w-full"
-                value={courierFilter}
-                onChange={(e) => setCourierFilter(e.target.value)}
-              >
-                <option value="all">Todos</option>
-                {repartidores.map((r) => (
-                  <option key={r.id} value={r.id}>{r.name || 'Repartidor'}</option>
-                ))}
-              </select>
+          {/* Rápidos */}
+          <div className="col-span-2 sm:mr-3">
+            <div className="inline-flex w-full sm:w-auto rounded-lg border border-gray-300 overflow-hidden">
+              <button className={`px-3 py-2 text-sm flex-1 sm:flex-none text-center ${quickRange === 'today' ? 'bg-gray-900 text-white' : 'bg-white hover:bg-gray-50'}`} onClick={() => setQuickRange('today')} type="button">Hoy</button>
+              <button className={`px-3 py-2 text-sm flex-1 sm:flex-none text-center ${quickRange === 'week' ? 'bg-gray-900 text-white' : 'bg-white hover:bg-gray-50'}`} onClick={() => setQuickRange('week')} type="button">Semana</button>
+              <button className={`px-3 py-2 text-sm flex-1 sm:flex-none text-center ${quickRange === 'month' ? 'bg-gray-900 text-white' : 'bg-white hover:bg-gray-50'}`} onClick={() => setQuickRange('month')} type="button">Mes</button>
+              <button className={`px-3 py-2 text-sm flex-1 sm:flex-none text-center ${quickRange === 'range' ? 'bg-gray-900 text-white' : 'bg-white hover:bg-gray-50'}`} onClick={() => setQuickRange('range')} type="button" title="Rango">
+                <CalendarRange size={16} className="inline -mt-0.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Fechas */}
+          <div className="sm:mr-3">
+            <DateInput
+              className="border border-gray-300 rounded-lg px-2 py-2 text-sm w-[90%] sm:w-[138px]"
+              value={fromDate}
+              onChange={(e) => { setQuickRange('range'); setFromDate(e.target.value); }}
+            />
+          </div>
+          <div className="sm:mr-3">
+            <DateInput
+              className="border border-gray-300 rounded-lg px-2 py-2 text-sm w-[90%] sm:w-[138px]"
+              value={toDate}
+              onChange={(e) => { setQuickRange('range'); setToDate(e.target.value); }}
+            />
+          </div>
+
+          {/* Cartera */}
+          <div className="flex items-center gap-2 sm:mr-3">
+            <UsersIcon size={16} className="text-gray-500 hidden sm:inline" />
+            <select
+              className="border border-gray-300 rounded-lg px-2 py-2 text-sm bg-white w-full sm:w-[112px]"
+              value={ownerFilter}
+              onChange={(e) => setOwnerFilter(e.target.value)}
+              title="Cartera"
+            >
+              <option value="all">Todos</option>
+              <option value="rucapellan">Rucapellan</option>
+              <option value="cecil">Cecil</option>
+            </select>
+          </div>
+
+          {/* Repartidor */}
+          <div className="flex items-center gap-2 sm:mr-3">
+            <Truck size={16} className="text-gray-500 hidden sm:inline" />
+            <select
+              className="border border-gray-300 rounded-lg px-2 py-2 text-sm bg-white w-full sm:w-[112px]"
+              value={courierFilter}
+              onChange={(e) => setCourierFilter(e.target.value)}
+              title="Repartidor"
+            >
+              <option value="all">Todos</option>
+              {repartidores.map((r) => (
+                <option key={r.id} value={String(r.id)}>
+                  {r.name || r.email || 'Repartidor'}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Factura (solo desktop) */}
+          <div className="hidden sm:flex items-center gap-2 sm:mr-3">
+            <Receipt size={16} className="text-gray-500 hidden sm:inline" />
+            <select
+              className="border border-gray-300 rounded-lg px-2 py-2 text-sm bg-white w-full sm:w-[112px]"
+              value={invoiceFilter}
+              onChange={(e) => setInvoiceFilter(e.target.value)}
+              title="Factura"
+            >
+              <option value="all">Todas</option>
+              <option value="facturado">Facturado</option>
+              <option value="no_facturado">No facturado</option>
+              <option value="sin_factura">Sin factura</option>
+            </select>
+          </div>
+
+          {/* Pago (estado) */}
+          <div className="flex itemscenter gap-2 sm:mr-3">
+            <DollarSign size={16} className="text-gray-500 hidden sm:inline" />
+            <select
+              className="border border-gray-300 rounded-lg px-2 py-2 text-sm bg-white w-full sm:w-[112px]"
+              value={paidFilter}
+              onChange={(e) => setPaidFilter(e.target.value)}
+              title="Pago"
+            >
+              <option value="all">Todas</option>
+              <option value="pagado">Pagado</option>
+              <option value="no_pagado">No pagado</option>
+            </select>
+          </div>
+
+          {/* Método de pago */}
+          <div className="flex items-center gap-2 sm:mr-3">
+            <CreditCard size={16} className="text-gray-500 hidden sm:inline" />
+            <select
+              className="border border-gray-300 rounded-lg px-2 py-2 text-sm bg-white w-full sm:w-[112px]"
+              value={paymentFilter}
+              onChange={(e) => setPaymentFilter(e.target.value)}
+              title="Método de pago"
+            >
+              <option value="all">Todos</option>
+              <option value="efectivo">Efectivo</option>
+              <option value="transferencia">Transferencia</option>
+              <option value="cheque">Cheque</option>
+            </select>
+          </div>
+
+          {/* Botón Guardar filtros (disquete) */}
+          <div className="col-span-2 sm:ml-auto sm:mr-0 flex items-center justify-end w-full">
+            <div className="inline-flex items-center gap-2">
+              {justSaved && (
+                <span className="inline-flex items-center gap-1 text-emerald-700 text-sm">
+                  <Check size={16} /> Guardado
+                </span>
+              )}
+              {isDirty && (
+                <button
+                  type="button"
+                  onClick={saveFilters}
+                  title="Guardar filtros por defecto"
+                  className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white hover:bg-gray-50"
+                >
+                  <Save size={16} /> Guardar
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -398,245 +845,428 @@ const SalesPage = () => {
       {/* Estado */}
       {loading && <p className="text-gray-600">Cargando ventas…</p>}
       {!loading && loadError && <p className="text-rose-600">{loadError}</p>}
-      {!loading && !loadError && filtered.length === 0 && (
-        <p className="text-gray-600">No hay ventas que coincidan con los filtros.</p>
-      )}
-
-      {/* MOBILE */}
       {!loading && !loadError && filtered.length > 0 && (
-        <div className="sm:hidden space-y-3">
-          {filtered.map((o) => {
-            const c = clientMap.get(o.clientId);
-            const addr = c?.dir1 || '—';
-            const courier = userMap.get(o.deliveredBy);
-            const owner = c ? userMap.get(c.ownerId || c.sellerId) : null;
+        <>
+          {/* MOBILE */}
+          <div className="sm:hidden space-y-3">
+            {filtered.map((o, idx) => {
+              const c = clientMap.get(o.clientId);
+              const owner = norm(c?.clientOwner || c?.client_owner || o.clientOwner);
+              const { label: invLabel, cls: invCls } = invoiceView(o, 'sm');
 
-            const invoiceLabel = o.invoice
-              ? (o.invoiceSent ? 'Facturada' : 'No facturada')
-              : 'Sin factura';
-            const invoiceCls = o.invoice
-              ? (o.invoiceSent
-                  ? 'bg-brand-50 text-brand-700 ring-brand-200'
-                  : 'bg-gray-50 text-coffee ring-gray-200')
-              : 'bg-gray-50 text-gray-500 ring-gray-200';
+              const sumItems = (o.items ?? []).reduce(
+                (acc, it) =>
+                  acc +
+                  (Number(it.subtotal) ||
+                    (Number(it.qty) * Number(it.price) || 0)),
+                0
+              );
+              const totalDisplay = CLP.format(Number(o.total) || sumItems);
 
-            return (
-              <div key={o.id} className="bg-white rounded-xl shadow p-3 border border-gray-100">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-base font-semibold text-coffee">{o.clientName || '—'}</h3>
-                    <p className="text-sm text-gray-600">{o.clientLocal || '—'}</p>
-                  </div>
-                  <div className="text-sm text-gray-500">{fmtDate(o.deliveredAt || o.deliveryDate)}</div>
-                </div>
+              const localTxt = o.clientLocal || '—';
+              const personTxt = o.clientName || '—';
 
-                <div className="mt-2 flex items-center justify-between">
-                  <p className="text-sm text-coffee">
-                    <span className="font-medium text-coffee">Dirección: </span>
-                    {addr}
-                  </p>
-                  {addr && (
-                    <a
-                      href={mapsUrl(addr)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-brand-50 text-brand-600 hover:bg-brand-100 border border-brand-200"
-                      title="Abrir en Google Maps"
-                      aria-label="Abrir en Google Maps"
-                    >
-                      <Navigation size={16} />
-                    </a>
-                  )}
-                </div>
+              return (
+                <div
+                  key={o.id}
+                  className={`rounded-xl p-3 border ${
+                    idx % 2 === 0
+                      ? 'bg-white border-gray-200'
+                      : 'bg-gray-50 border-gray-200'
+                  }`}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="pr-2">
+                      {/* LOCAL ARRIBA */}
+                      <h3 className="text-base font-semibold text-coffee-900 leading-tight break-words">
+                        {localTxt}
+                      </h3>
 
-                <div className="mt-2 text-sm text-coffee flex items-center justify-between">
-                  <span>
-                    <span className="text-gray-500">Socio: </span>{labelSocio(owner)}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Truck size={14} className="text-gray-400" />
-                    {courier?.name || '—'}
-                  </span>
-                </div>
-
-                {/* Items */}
-                <div className="mt-3 rounded-lg border border-gray-200 p-3 bg-gray-50">
-                  <ul className="space-y-1 text-sm">
-                    {(o.items ?? []).length === 0 && <li className="text-gray-500">Sin productos</li>}
-                    {(o.items ?? []).map((it, i) => (
-                      <li key={i} className="flex items-center justify-between">
-                        <span className="text-coffee">
-                          {it.name || 'Producto'} × {it.qty}
-                        </span>
-                        <span className="text-coffee font-medium">
-                          {CLP.format(Number(it.subtotal) || (Number(it.qty) * Number(it.price) || 0))}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                {/* Método + Pago + Factura (mismo tamaño) + Total */}
-                <div className="mt-3 flex items-end justify-between gap-2">
-                  <div className="flex items-center gap-1.5 flex-wrap max-w-[70%]">
-                    <PaymentPill value={o.paymentMethod} />
-                    <button
-                      type="button"
-                      onClick={() => togglePaid(o.id)}
-                      className={`${PILL} ${
-                        o.paid
-                          ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
-                          : 'bg-gray-50 text-coffee ring-gray-200'
-                      }`}
-                      title="Marcar pago"
-                    >
-                      {o.paid ? 'Pagado' : 'No pagado'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => o.invoice && toggleInvoiceSent(o.id)}
-                      disabled={!o.invoice}
-                      className={`${PILL} ${invoiceCls} ${!o.invoice ? 'cursor-not-allowed opacity-70' : ''}`}
-                      title={o.invoice ? 'Marcar facturación' : 'Pedido sin factura'}
-                    >
-                      {invoiceLabel}
-                    </button>
+                      {/* Persona abajo + cuenta */}
+                      <div className="mt-0.5 flex items-center gap-2 text-sm text-gray-700">
+                        <span className="truncate max-w-[60vw]">{personTxt}</span>
+                        {o.clientId && (
+                          <button
+                            type="button"
+                            className="inline-flex items-center justify-center rounded hover:bg-gray-100 p-1 text-gray-600"
+                            title="Ver cuenta del cliente"
+                            aria-label="Ver cuenta del cliente"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={() => goClientAccount(o.clientId)}
+                          >
+                            <ExternalLink size={16} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="shrink-0 flex items-center gap-2">
+                      <OrderNumberTag order={o} />
+                      {ownerPill(owner, 'sm')}
+                    </div>
                   </div>
 
-                  <div className="text-base font-semibold text-coffee shrink-0">
-                    {CLP.format(Number(o.total) || 0)}
+                  <div className="mt-1 text-sm text-gray-500">
+                    {fmtDateMobile(o.deliveryDate)}
+                  </div>
+
+                  <div className="mt-3 rounded-lg border border-amber-200 p-3 bg-amber-50">
+                    <ul className="space-y-1 text-sm">
+                      {(o.items ?? []).length === 0 && (
+                        <li className="text-gray-500">Sin productos</li>
+                      )}
+                      {(o.items ?? []).map((it, i) => (
+                        <li
+                          key={i}
+                          className="flex items-center justify-between"
+                        >
+                          <span className="text-gray-700">
+                            {it.name || 'Producto'} × {it.qty}
+                          </span>
+                          <span className="text-gray-900 font-medium">
+                            {CLP.format(
+                              Number(it.subtotal) ||
+                                (Number(it.qty) * Number(it.price) || 0)
+                            )}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+
+                    <div className="mt-2 pt-2 border-t border-gray-200 flex items-center justify-between text-sm font-semibold text-coffee-900">
+                      <span>Total</span>
+                      <span>{totalDisplay}</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex flex-col gap-2">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      {/* MÉTODO DE PAGO */}
+                      <button
+                        type="button"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={() => canUpdatePayMet && cyclePayment(o.id)}
+                        className={`inline-flex items-center gap-2 ${!canUpdatePayMet ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        title={canUpdatePayMet ? 'Cambiar método de pago' : 'Sin permiso'}
+                        disabled={!canUpdatePayMet}
+                      >
+                        <PaymentPill value={o.paymentMethod} size="sm" />
+                      </button>
+
+                      {/* Factura móvil */}
+                      {(() => {
+                        const disabled = !o.invoice || !canUpdateInv; // sin factura o sin permiso
+                        return (
+                          <button
+                            type="button"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={() => !disabled && toggleInvoiceMobile(o.id)}
+                            className={`inline-flex items-center gap-2 ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+                            title={
+                              !canUpdateInv
+                                ? 'Sin permiso'
+                                : !o.invoice
+                                ? 'Sin factura (cámbialo solo desde Orders)'
+                                : 'Alternar Facturada / No facturada'
+                            }
+                            disabled={disabled}
+                          >
+                            <span className={invCls}>{invLabel}</span>
+                          </button>
+                        );
+                      })()}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onPointerDown={((e) => e.stopPropagation())}
+                        onClick={() => canMarkPaid && togglePaid(o.id)}
+                        className={`${paidPillCls(o.paid, 'sm')} ${!canMarkPaid ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        title={canMarkPaid ? 'Marcar pago' : 'Sin permiso'}
+                        disabled={!canMarkPaid}
+                      >
+                        {o.paid ? 'Pagado' : 'No pagado'}
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </div>
 
-      {/* DESKTOP */}
-      {!loading && !loadError && filtered.length > 0 && (
-        <div className="hidden sm:block">
-          <div className="rounded-xl border border-gray-200 shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="min-w-[1050px] w-full">
-                <thead className="bg-gray-50">
-                  <tr className="text-left">
-                    <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Fecha</th>
-                    <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Cliente</th>
-                    <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Local</th>
-                    <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Socio</th>
-                    <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Repartidor</th>
-                    <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-center">Items</th>
-                    <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Método</th>
-                    <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Factura</th>
-                    <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">Pago</th>
-                    <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-right">Total</th>
-                  </tr>
-                </thead>
+          {/* DESKTOP */}
+          <div className="hidden sm:block">
+            <div className="rounded-xl border border-gray-200 shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="min-w-[1100px] w-full table-fixed">
+                  <colgroup>
+                    <col style={{ width: '110px' }} />
+                    <col style={{ width: '110px' }} />
+                    <col style={{ width: '240px' }} />
+                    <col style={{ width: '180px' }} />
+                    <col style={{ width: '120px' }} />
+                    <col style={{ width: '140px' }} />
+                    <col style={{ width: '80px' }} />
+                    <col style={{ width: '160px' }} />
+                    <col style={{ width: '160px' }} />
+                    <col style={{ width: '200px' }} />
+                    <col />
+                  </colgroup>
+                  <thead className="bg-gray-50">
+                    <tr className="text-left">
+                      <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
+                        Venta
+                      </th>
+                      <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
+                        Fecha
+                      </th>
+                      <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
+                        Local
+                      </th>
+                      <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
+                        Cliente
+                      </th>
+                      <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
+                        Cartera
+                      </th>
+                      <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
+                        Repartidor
+                      </th>
+                      <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-center">
+                        Items
+                      </th>
+                      <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
+                        Método
+                      </th>
+                      <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
+                        Factura
+                      </th>
+                      <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600">
+                        Pago
+                      </th>
+                      <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-600 text-right">
+                        Total
+                      </th>
+                    </tr>
+                  </thead>
 
-                <tbody className="divide-y divide-gray-200">
-                  {filtered.map((o, idx) => {
-                    const c = clientMap.get(o.clientId);
-                    const owner = c ? userMap.get(c.ownerId || c.sellerId) : null;
-                    const courier = userMap.get(o.deliveredBy);
-                    const items = o.items ?? [];
+                  <tbody className="divide-y divide-gray-200">
+                    {filtered.map((o, idx) => {
+                      const c = clientMap.get(o.clientId);
+                      const owner = norm(c?.clientOwner || c?.client_owner || o.clientOwner);
+                      const courier = userMap.get(o.deliveredBy);
+                      const items = o.items ?? [];
+                      const { label: invLabel, cls: invCls } = invoiceView(o);
+                      const localText = o.clientLocal || '—';
 
-                    const invoiceLabel = o.invoice
-                      ? (o.invoiceSent ? 'Facturada' : 'No facturada')
-                      : 'Sin factura';
-                    const invoiceCls = o.invoice
-                      ? (o.invoiceSent
-                          ? 'bg-brand-50 text-brand-700 ring-brand-200'
-                          : 'bg-gray-50 text-coffee ring-gray-200')
-                      : 'bg-gray-50 text-gray-500 ring-gray-200';
+                      const canInvBtn = !!o.invoice && canUpdateInv;
 
-                    return (
-                      <React.Fragment key={o.id}>
-                        <tr className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-colors`}>
-                          <td className="px-6 py-3 text-sm text-coffee">{fmtDate(o.deliveredAt || o.deliveryDate)}</td>
-                          <td className="px-6 py-3 text-sm text-coffee">{o.clientName || '—'}</td>
-                          <td className="px-6 py-3 text-sm text-coffee">{o.clientLocal || '—'}</td>
-                          <td className="px-6 py-3 text-sm text-coffee">{labelSocio(owner)}</td>
-                          <td className="px-6 py-3 text-sm text-coffee">{courier?.name || '—'}</td>
-                          <td className="px-6 py-3 text-sm text-center">{items.length}</td>
-                          <td className="px-6 py-3 text-sm">
-                            <PaymentPill value={o.paymentMethod} />
-                          </td>
-                          <td className="px-6 py-3 text-sm">
-                            <button
-                              type="button"
-                              onClick={() => o.invoice && toggleInvoiceSent(o.id)}
-                              disabled={!o.invoice}
-                              className={`${PILL} ${invoiceCls} ${!o.invoice ? 'cursor-not-allowed opacity-70' : ''}`}
-                              title={o.invoice ? 'Marcar facturación' : 'Pedido sin factura'}
-                            >
-                              {invoiceLabel}
-                            </button>
-                          </td>
-                          <td className="px-6 py-3 text-sm">
-                            <button
-                              type="button"
-                              onClick={() => togglePaid(o.id)}
-                              className={`${PILL} ${
-                                o.paid
-                                  ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
-                                  : 'bg-gray-50 text-coffee ring-gray-200'
-                              }`}
-                              title="Marcar pago"
-                            >
-                              {o.paid ? 'Pagado' : 'No pagado'}
-                            </button>
-                          </td>
-                          <td className="px-6 py-3 text-sm text-right font-medium text-coffee">
-                            {CLP.format(Number(o.total) || 0)}
-                          </td>
-                        </tr>
-
-                        {/* Detalle de productos */}
-                        <tr className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
-                          <td colSpan={10} className="px-6 pb-4">
-                            <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 p-4">
-                              <h4 className="text-sm font-semibold text-coffee mb-2">Detalle de productos</h4>
-                              <div className="overflow-x-auto">
-                                <table className="min-w-full">
-                                  <thead>
-                                    <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
-                                      <th className="py-1 pr-4">Producto</th>
-                                      <th className="py-1 pr-4">Cantidad</th>
-                                      <th className="py-1 pr-4 text-right">Precio</th>
-                                      <th className="py-1 pr-0 text-right">Subtotal</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="text-sm text-coffee">
-                                    {items.length === 0 && (
-                                      <tr>
-                                        <td colSpan={4} className="py-2 text-gray-500">Sin productos</td>
-                                      </tr>
-                                    )}
-                                    {items.map((it, i) => (
-                                      <tr key={i} className="border-t border-gray-200">
-                                        <td className="py-1 pr-4">{it.name || 'Producto'}</td>
-                                        <td className="py-1 pr-4">{it.qty}</td>
-                                        <td className="py-1 pr-4 text-right">{CLP.format(Number(it.price) || 0)}</td>
-                                        <td className="py-1 pr-0 text-right">
-                                          {CLP.format(Number(it.subtotal) || (Number(it.qty) * Number(it.price) || 0))}
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
+                      return (
+                        <React.Fragment key={o.id}>
+                          <tr
+                            className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-colors`}
+                          >
+                            <td className="px-6 py-3 text-sm text-coffee-900 whitespace-nowrap">
+                              <OrderNumberTag order={o} />
+                            </td>
+                            <td className="px-6 py-3 text-sm text-coffee-900 whitespace-nowrap">
+                              {fmtDateDMY(o.deliveryDate)}
+                            </td>
+                            <td className="px-6 py-3 text-sm text-gray-700">
+                              <div className="inline-flex items-start gap-2">
+                                <span
+                                  className="block whitespace-normal break-words leading-tight"
+                                  style={{
+                                    width: '20ch',
+                                    display: '-webkit-box',
+                                    WebkitLineClamp: 2,
+                                    WebkitBoxOrient: 'vertical',
+                                    overflow: 'hidden',
+                                  }}
+                                  title={localText}
+                                >
+                                  {localText}
+                                </span>
+                                {o.clientId && (
+                                  <button
+                                    type="button"
+                                    onPointerDown={stopPD}
+                                    onClick={() => goClientAccount(o.clientId)}
+                                    className="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-gray-100 text-gray-600 shrink-0"
+                                    title="Ver cuenta del cliente (abonar desde ahí)"
+                                    aria-label="Ver cuenta del cliente"
+                                  >
+                                    <ExternalLink size={16} />
+                                  </button>
+                                )}
                               </div>
-                            </div>
-                          </td>
-                        </tr>
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
+                            </td>
+                            <td className="px-6 py-3 text-sm text-coffee-900">
+                              {o.clientName || '—'}
+                            </td>
+                            <td className="px-6 py-3 text-sm">
+                              {ownerPill(owner)}
+                            </td>
+                            <td className="px-6 py-3 text-sm text-gray-700">
+                              {courier?.name || '—'}
+                            </td>
+                            <td className="px-6 py-3 text-sm text-center whitespace-nowrap">
+                              {items.length}
+                            </td>
+
+                            {/* MÉTODO DE PAGO */}
+                            <td className="px-6 py-3 text-sm whitespace-nowrap">
+                              <button
+                                type="button"
+                                className={`inline-flex items-center gap-2 ${!canUpdatePayMet ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                onPointerDown={stopPD}
+                                onClick={() => canUpdatePayMet && cyclePayment(o.id)}
+                                title={canUpdatePayMet ? 'Cambiar método de pago' : 'Sin permiso'}
+                                disabled={!canUpdatePayMet}
+                              >
+                                <PaymentPill value={o.paymentMethod} />
+                              </button>
+                            </td>
+
+                            {/* Factura */}
+                            <td className="px-6 py-3 text-sm whitespace-nowrap">
+                              <div className="relative inline-block">
+                                <button
+                                  type="button"
+                                  onPointerDown={stopPD}
+                                  onClick={() => {
+                                    if (!canInvBtn) return;
+                                    setOpenInvoiceId((v) => (v === o.id ? null : o.id));
+                                  }}
+                                  className={`inline-flex items-center gap-2 ${!canInvBtn ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                  title={
+                                    !canUpdateInv
+                                      ? 'Sin permiso'
+                                      : !o.invoice
+                                      ? 'Sin factura (cámbialo solo desde Orders)'
+                                      : 'Cambiar estado de factura'
+                                  }
+                                  disabled={!canInvBtn}
+                                >
+                                  <span className={invCls}>{invLabel}</span>
+                                </button>
+
+                                {openInvoiceId === o.id && (
+                                  <div
+                                    className="absolute top-full left-0 mt-1 w-44 rounded-lg border border-gray-200 bg-white shadow-lg z-50 flex flex-col"
+                                    onPointerDown={stopPD}
+                                  >
+                                    <button
+                                      className="w-full text-left px-3 py-2 text-sm opacity-50 cursor-not-allowed"
+                                      title="Sin factura se gestiona desde Orders"
+                                      disabled
+                                    >
+                                      Sin factura
+                                    </button>
+                                    <button
+                                      className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                                      onClick={() => {
+                                        setOpenInvoiceId(null);
+                                        updateInvoiceStatus(o.id, 'no_facturada');
+                                      }}
+                                    >
+                                      No facturada
+                                    </button>
+                                    <button
+                                      className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                                      onClick={() => {
+                                        setOpenInvoiceId(null);
+                                        updateInvoiceStatus(o.id, 'facturada');
+                                      }}
+                                    >
+                                      Facturada
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+
+                            <td className="px-6 py-3 text-sm whitespace-nowrap">
+                              <button
+                                type="button"
+                                onPointerDown={stopPD}
+                                onClick={() => canMarkPaid && togglePaid(o.id)}
+                                className={`${paidPillCls(o.paid)} inline-flex items-center gap-1 ${!canMarkPaid ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                title={canMarkPaid ? 'Marcar pago' : 'Sin permiso'}
+                                disabled={!canMarkPaid}
+                              >
+                                {o.paid ? 'Pagado' : 'No pagado'}
+                              </button>
+                            </td>
+                            <td className="px-6 py-3 text-sm text-right font-semibold text-coffee-900 whitespace-nowrap">
+                              {CLP.format(Number(o.total) || 0)}
+                            </td>
+                          </tr>
+
+                          <tr className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                            <td colSpan={11} className="px-6 pb-4">
+                              <div className="mt-1 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                                <h4 className="text-sm font-semibold text-coffee-900 mb-2">
+                                  Detalle de productos
+                                </h4>
+                                <div className="overflow-x-auto">
+                                  <table className="min-w-full table-fixed">
+                                    <colgroup>
+                                      <col style={{ width: '55%' }} />
+                                      <col style={{ width: '15%' }} />
+                                      <col style={{ width: '15%' }} />
+                                      <col style={{ width: '15%' }} />
+                                    </colgroup>
+                                    <thead>
+                                      <tr className="text-left text-xs uppercase tracking-wide text-gray-700 border-b border-amber-100">
+                                        <th className="py-1 pr-2">Producto</th>
+                                        <th className="py-1 pr-2">Cantidad</th>
+                                        <th className="py-1 pr-2 text-right">Precio</th>
+                                        <th className="py-1 pr-0 text-right">Subtotal</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="text-sm text-gray-800">
+                                      {items.length === 0 && (
+                                        <tr>
+                                          <td colSpan={4} className="py-2 text-gray-600">
+                                            Sin productos
+                                          </td>
+                                        </tr>
+                                      )}
+                                      {items.map((it, i) => (
+                                        <tr key={i} className="border-t border-amber-100">
+                                          <td className="py-1 pr-2">
+                                            {it.name || 'Producto'}
+                                          </td>
+                                          <td className="py-1 pr-2">
+                                            {it.qty}
+                                          </td>
+                                          <td className="py-1 pr-2 text-right">
+                                            {CLP.format(Number(it.price) || 0)}
+                                          </td>
+                                          <td className="py-1 pr-0 text-right">
+                                            {CLP.format(
+                                              Number(it.subtotal) ||
+                                                (Number(it.qty) * Number(it.price) || 0)
+                                            )}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
-        </div>
+        </>
       )}
     </Layout>
   );

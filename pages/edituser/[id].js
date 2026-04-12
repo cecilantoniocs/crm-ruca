@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+// /pages/edituser/[id].js
+import React, { useEffect, useMemo, useState } from 'react';
 import Layout from '../../components/Layout';
 import { useRouter } from 'next/router';
 import { useFormik } from 'formik';
@@ -10,15 +11,137 @@ import {
   PERMISSIONS_SCHEMA,
   templateForRole,
   emptyPermissions,
+  getCurrentUser,
+  isAdmin as isAdminHelper,
+  can as canHelper,
 } from '../../helpers/permissions';
 
 const ROLE_OPTIONS = [
-  { value: 'admin', label: 'Admin' },
-  { value: 'vendedor', label: 'Vendedor' },
-  { value: 'repartidor', label: 'Repartidor' },
-  { value: 'supervisor', label: 'Supervisor' },
+  { value: 'admin',       label: 'Admin' },
+  { value: 'vendedor',    label: 'Vendedor' },
+  { value: 'supervisor',  label: 'Supervisor' },
+  { value: 'repartidor',  label: 'Repartidor' },
+  { value: 'produccion',  label: 'Producción' },
 ];
 
+const CARTERAS_OPTIONS = [
+  { value: 'rucapellan', label: 'Rucapellán' },
+  { value: 'cecil',      label: 'Cecil' },
+];
+
+// ---------------------------------------------
+// helpers de mapeo permisos <-> array backend
+// ---------------------------------------------
+function normalizeToken(token) {
+  return String(token || '').toLowerCase().replace(/\./g, ':');
+}
+
+function listToPermsObject(list = []) {
+  const out = emptyPermissions();
+  const has = (k) => {
+    const norm = normalizeToken(k);
+    return list.some((p) => normalizeToken(p) === norm);
+  };
+
+  const legacySalesUpdate = has('sales:update');
+
+  // clients
+  out.clients.view   = has('clients:read');
+  out.clients.create = has('clients:create');
+  out.clients.edit   = has('clients:update');
+  out.clients.delete = has('clients:delete');
+
+  // orders
+  out.orders.view          = has('orders:read') || has('orders:update') || has('orders:create') || has('orders:delete');
+  out.orders.create        = has('orders:create');
+  out.orders.edit          = has('orders:update');
+  out.orders.delete        = has('orders:delete');
+  out.orders.markDelivered = has('orders:update');
+
+  // products
+  out.products.view   = has('products:read') || has('products:update') || has('products:create') || has('products:delete');
+  out.products.create = has('products:create');
+  out.products.edit   = has('products:update');
+  out.products.delete = has('products:delete');
+
+  // sales (granular)
+  out.sales.view           = has('sales:read') || legacySalesUpdate;
+  out.sales.markPaid       = has('sales.mark_paid') || legacySalesUpdate;
+  out.sales.updateInvoice  = has('sales.update_invoice') || legacySalesUpdate;
+  out.sales.updatePayment  = has('sales.update_payment') || legacySalesUpdate;
+  // KPIs
+  out.sales.kpis          = has('sales.kpis.view') || legacySalesUpdate;
+
+  // clientAccount
+  out.clientAccount.read   = has('client.account.read');
+  out.clientAccount.charge = has('client.account.charge');
+
+  // tracking (acepta variantes)
+  out.tracking.view =
+    has('tracking:view') ||
+    has('tracking.read') ||
+    has('gps:view') ||
+    has('gps.read') ||
+    has('locations:view') ||
+    has('locations.read');
+
+  // users
+  out.users.view   = has('users:read') || has('users:update') || has('users:create') || has('users:delete');
+  out.users.create = has('users:create');
+  out.users.edit   = has('users:update');
+  out.users.delete = has('users:delete');
+
+  return out;
+}
+
+function permsObjectToList(permsObj = {}) {
+  const result = [];
+
+  // clients
+  if (permsObj.clients?.view)   result.push('clients:read');
+  if (permsObj.clients?.create) result.push('clients:create');
+  if (permsObj.clients?.edit)   result.push('clients:update');
+  if (permsObj.clients?.delete) result.push('clients:delete');
+
+  // orders
+  if (permsObj.orders?.view)          result.push('orders:read');
+  if (permsObj.orders?.create)        result.push('orders:create');
+  if (permsObj.orders?.edit)          result.push('orders:update');
+  if (permsObj.orders?.delete)        result.push('orders:delete');
+  if (permsObj.orders?.markDelivered) result.push('orders:update');
+
+  // products
+  if (permsObj.products?.view)   result.push('products:read');
+  if (permsObj.products?.create) result.push('products:create');
+  if (permsObj.products?.edit)   result.push('products:update');
+  if (permsObj.products?.delete) result.push('products:delete');
+
+  // sales (granular)
+  if (permsObj.sales?.view)           result.push('sales:read');
+  if (permsObj.sales?.markPaid)       result.push('sales.mark_paid');
+  if (permsObj.sales?.updateInvoice)  result.push('sales.update_invoice');
+  if (permsObj.sales?.updatePayment)  result.push('sales.update_payment');
+  if (permsObj.sales?.kpis)           result.push('sales.kpis.view');
+
+  // clientAccount
+  if (permsObj.clientAccount?.read)   result.push('client.account.read');
+  if (permsObj.clientAccount?.charge) result.push('client.account.charge');
+
+  // tracking
+  if (permsObj.tracking?.view) result.push('tracking.view');
+
+  // users
+  if (permsObj.users?.view)   result.push('users:read');
+  if (permsObj.users?.create) result.push('users:create');
+  if (permsObj.users?.edit)   result.push('users:update');
+  if (permsObj.users?.delete) result.push('users:delete');
+
+  return Array.from(new Set(result));
+}
+
+// ---------------------------------------------
+// componente principal
+// ---------------------------------------------
 const EditUser = () => {
   const router = useRouter();
   const { id } = router.query;
@@ -27,6 +150,16 @@ const EditUser = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
+  // Guard de acceso: solo Admin o quien tenga users.edit
+  useEffect(() => {
+    const me = getCurrentUser();
+    const allowed = isAdminHelper(me) || canHelper('users.edit', null, me);
+    if (!allowed) {
+      router.replace('/users');
+    }
+  }, [router]);
+
+  // cargar usuario
   useEffect(() => {
     if (!id) return;
     (async () => {
@@ -44,23 +177,40 @@ const EditUser = () => {
     })();
   }, [id, router]);
 
+  // permisos iniciales para el form
+  const initialPerms = useMemo(() => {
+    if (!user) return templateForRole('vendedor');
+
+    const roleLower = String(user.role || '').toLowerCase();
+
+    if (roleLower === 'admin') {
+      return templateForRole('admin'); // all true
+    }
+
+    if (Array.isArray(user.permissions) && user.permissions.length > 0) {
+      return listToPermsObject(user.permissions);
+    }
+    return templateForRole(roleLower || 'vendedor');
+  }, [user]);
+
   const formik = useFormik({
     enableReinitialize: true,
     initialValues: {
       name: user?.name || '',
       email: user?.email || '',
-      role: user?.role || 'vendedor',
-      partnerTag: user?.partnerTag || '',
-      // cambio de contraseña opcional
+      role: (user?.role || 'vendedor').toLowerCase(),
+      carteras: Array.isArray(user?.carteras) ? user.carteras : [],
       newPassword: '',
       confirmPassword: '',
-      permissions: user?.perms || templateForRole(user?.role || 'vendedor'),
+      permissions: initialPerms,
+      canDeliver: !!(user?.can_deliver ?? user?.canDeliver),
     },
     validationSchema: Yup.object({
       name: Yup.string().required('El nombre es obligatorio'),
       email: Yup.string().email('Email inválido').required('El email es obligatorio'),
-      role: Yup.string().required('El rol es obligatorio'),
-      partnerTag: Yup.string().max(30, 'Máx 30 caracteres'),
+      role: Yup.string()
+        .oneOf(ROLE_OPTIONS.map((r) => r.value))
+        .required('El rol es obligatorio'),
       newPassword: Yup.string().min(4, 'Mínimo 4 caracteres').notRequired(),
       confirmPassword: Yup.string().oneOf(
         [Yup.ref('newPassword'), ''],
@@ -70,22 +220,40 @@ const EditUser = () => {
     onSubmit: async (values) => {
       try {
         setSubmitting(true);
+
+        // Convertir flags a lista flat (granular)
+        let permsList = permsObjectToList(values.permissions || emptyPermissions());
+
+        // Si el rol es admin, guarda TODO true (robusto)
+        if (values.role === 'admin') {
+          const full = templateForRole('admin');
+          permsList = permsObjectToList(full);
+        }
+
         const patch = {
           name: values.name,
           email: values.email,
           role: values.role,
-          partnerTag: values.partnerTag || '',
-          perms: values.permissions || emptyPermissions(),
+          carteras: values.role === 'admin' ? ['rucapellan', 'cecil'] : values.carteras,
+          perms: permsList,
+          canDeliver: !!values.canDeliver,
         };
+
         if (values.newPassword?.trim()) {
           patch.password = values.newPassword.trim();
         }
+
         await axiosClient.patch(`users/${id}`, patch);
+
         await Swal.fire('Guardado', 'Usuario actualizado correctamente.', 'success');
         router.push('/users');
       } catch (e) {
         console.error(e);
-        Swal.fire('Error', 'No se pudo actualizar el usuario.', 'error');
+        Swal.fire(
+          'Error',
+          e?.response?.data?.error || 'No se pudo actualizar el usuario.',
+          'error'
+        );
       } finally {
         setSubmitting(false);
       }
@@ -95,7 +263,22 @@ const EditUser = () => {
   const handleRoleChange = (e) => {
     const newRole = e.target.value;
     formik.setFieldValue('role', newRole);
-    formik.setFieldValue('permissions', templateForRole(newRole));
+    const tpl = templateForRole(newRole);
+    formik.setFieldValue('permissions', tpl);
+    if (newRole === 'admin') {
+      formik.setFieldValue('carteras', ['rucapellan', 'cecil']);
+    }
+    if (newRole === 'repartidor') {
+      formik.setFieldValue('canDeliver', true);
+    }
+  };
+
+  const toggleCartera = (val) => {
+    const current = formik.values.carteras || [];
+    const next = current.includes(val)
+      ? current.filter((c) => c !== val)
+      : [...current, val];
+    formik.setFieldValue('carteras', next);
   };
 
   const togglePerm = (mod, action) => {
@@ -110,7 +293,7 @@ const EditUser = () => {
       <p className="mt-1 text-xs text-rose-600">{formik.errors[id]}</p>
     ) : null;
 
-  const permsDisabled = formik.values.role === 'admin';
+  const permsDisabled = false;
 
   return (
     <Layout>
@@ -130,6 +313,7 @@ const EditUser = () => {
       </div>
 
       {loading && <p className="text-gray-600">Cargando usuario…</p>}
+
       {!loading && user && (
         <form
           onSubmit={formik.handleSubmit}
@@ -157,7 +341,6 @@ const EditUser = () => {
               {renderError('email')}
             </div>
 
-            {/* Rol */}
             <div>
               <label className="block text-sm font-medium text-coffee mb-1">Rol</label>
               <select
@@ -175,19 +358,34 @@ const EditUser = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-coffee mb-1">
-                Etiqueta de socio (opcional)
-              </label>
-              <input
-                type="text"
-                placeholder="Ej: Cecil"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-1 focus:ring-brand-500"
-                {...formik.getFieldProps('partnerTag')}
-              />
-              {renderError('partnerTag')}
+              <label className="block text-sm font-medium text-coffee mb-1">Carteras</label>
+              <div className="flex gap-3 mt-1">
+                {CARTERAS_OPTIONS.map((c) => {
+                  const checked = (formik.values.carteras || []).includes(c.value);
+                  const isAdminRole = formik.values.role === 'admin';
+                  return (
+                    <label
+                      key={c.value}
+                      className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer ${
+                        checked || isAdminRole
+                          ? 'bg-brand-50 border-brand-200 text-brand-700'
+                          : 'bg-white border-gray-300 text-coffee hover:bg-gray-50'
+                      } ${isAdminRole ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="accent-indigo-600"
+                        checked={checked || isAdminRole}
+                        onChange={() => !isAdminRole && toggleCartera(c.value)}
+                        disabled={isAdminRole}
+                      />
+                      {c.label}
+                    </label>
+                  );
+                })}
+              </div>
             </div>
 
-            {/* Cambio de contraseña (opcional) */}
             <div>
               <label className="block text-sm font-medium text-coffee mb-1">Nueva contraseña</label>
               <input
@@ -198,8 +396,11 @@ const EditUser = () => {
               />
               {renderError('newPassword')}
             </div>
+
             <div>
-              <label className="block text-sm font-medium text-coffee mb-1">Confirmar contraseña</label>
+              <label className="block text-sm font-medium text-coffee mb-1">
+                Confirmar contraseña
+              </label>
               <input
                 type="password"
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-1 focus:ring-brand-500"
@@ -208,15 +409,26 @@ const EditUser = () => {
               />
               {renderError('confirmPassword')}
             </div>
+
+            <div className="md:col-span-2">
+              <label className="inline-flex items-center gap-2 text-sm mt-2">
+                <input
+                  type="checkbox"
+                  checked={formik.values.canDeliver || false}
+                  onChange={(e) => formik.setFieldValue('canDeliver', e.target.checked)}
+                />
+                Puede repartir (aparece en “Repartidor asignado”)
+              </label>
+            </div>
           </div>
 
           {/* Permisos */}
           <div className="mt-6">
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-sm font-semibold text-coffee">Permisos</h2>
-              {permsDisabled && (
+              {formik.values.role === 'admin' && (
                 <span className="text-xs text-gray-500">
-                  El rol <b>Admin</b> tiene todos los permisos.
+                  Admin guarda todos los permisos al confirmar.
                 </span>
               )}
             </div>
@@ -232,15 +444,17 @@ const EditUser = () => {
                         <label
                           key={key}
                           className={`inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-xs ${
-                            checked ? 'bg-brand-50 border-brand-200 text-brand-700' : 'bg-white border-gray-300 text-coffee'
-                          } ${permsDisabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:bg-gray-50'}`}
+                            checked
+                              ? 'bg-brand-50 border-brand-200 text-brand-700'
+                              : 'bg-white border-gray-300 text-coffee hover:bg-gray-50 cursor-pointer'
+                          }`}
                         >
                           <input
                             type="checkbox"
                             className="accent-indigo-600"
                             checked={checked}
-                            onChange={() => !permsDisabled && togglePerm(mod, key)}
-                            disabled={permsDisabled}
+                            onChange={() => togglePerm(mod, key)}
+                            disabled={false}
                           />
                           {label}
                         </label>

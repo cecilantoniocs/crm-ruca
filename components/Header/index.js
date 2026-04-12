@@ -43,8 +43,8 @@ const Header = ({ setMenuOpen }) => {
 
         {/* Marca */}
         <Link href="/" className="text-base sm:text-lg font-semibold tracking-tight text-coffee">
-          <span className="text-coffee">CRM</span>{' '}
-          <span className="text-brand-600">Rucapellan</span>
+          <span className="text-coffee">Rook</span>{''}
+          <span className="text-brand-600">App</span>
         </Link>
 
         {/* Usuario + Salir bonito */}

@@ -1,6 +1,7 @@
 // pages/neworder.js
 import React, { useEffect, useMemo, useState } from 'react';
 import Layout from '../components/Layout';
+import DateInput from '../components/DateInput';
 import { useRouter } from 'next/router';
 import { v4 as uuidv4 } from 'uuid';
 import axiosClient from '../config/axios';
@@ -14,48 +15,119 @@ const CREATE_STATUS_OPTIONS = [
   { value: 'entregado', label: 'Entregado' },
 ];
 
+const PAYMENT_OPTIONS = [
+  { value: 'efectivo', label: 'Efectivo' },
+  { value: 'transferencia', label: 'Transferencia' },
+  { value: 'cheque', label: 'Cheque' },
+];
+
 const norm = (v) => (v ?? '').toString().trim().toLowerCase();
+const pillCls = 'inline-flex items-center rounded-full ring-1 px-2 py-0.5 text-[11px] font-medium';
+
+// Valida/normaliza URL o devuelve null (evita error "Invalid url" del backend)
+const toUrlOrNull = (v) => {
+  const s = (v ?? '').toString().trim();
+  if (!s) return null;
+  try {
+    const u = new URL(s);
+    if (!/^https?:$/i.test(u.protocol)) return null;
+    return s;
+  } catch {
+    return null;
+  }
+};
+
+const ownerPill = (o) => {
+  const v = (o || '').toString().toLowerCase();
+  const label = v === 'cecil' ? 'Cecil' : v === 'rucapellan' ? 'Rucapellan' : '—';
+  const cls =
+    v === 'rucapellan'
+      ? 'bg-rose-50 text-rose-700 ring-rose-200'
+      : v === 'cecil'
+      ? 'bg-sky-50 text-sky-700 ring-sky-200'
+      : 'bg-gray-50 text-gray-700 ring-gray-200';
+  return <span className={`${pillCls} ${cls}`}>{label}</span>;
+};
 
 const NewOrder = () => {
   const router = useRouter();
 
   const [clients, setClients] = useState([]);
   const [products, setProducts] = useState([]);
-  const [couriers, setCouriers] = useState([]);          // repartidores
+  const [couriers, setCouriers] = useState([]);          // repartidores (solo nombre/id)
   const [selectedCourierId, setSelectedCourierId] = useState(''); // repartidor elegido (opcional)
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // ---------- Estado del formulario ----------
   const [clientOpt, setClientOpt] = useState(null);
-  const [items, setItems] = useState([{ id: uuidv4(), product: null, qty: 1, price: '' }]);
+  const [items, setItems] = useState([{ id: uuidv4(), product: null, qty: '', price: '' }]);
   const [deliveryDate, setDeliveryDate] = useState('');
   const [status, setStatus] = useState(CREATE_STATUS_OPTIONS[0]); // 'pendiente' por defecto
+  const [paymentMethod, setPaymentMethod] = useState(PAYMENT_OPTIONS[0]); // 'efectivo' por defecto
   const [invoice, setInvoice] = useState(false);
 
   // ---------- Carga de datos ----------
   useEffect(() => {
     (async () => {
-      try {
-        const seller = getCurrentSeller?.();
-        if (seller?.id) {
-          const resC = await getClients(seller.id);
-          setClients(resC?.data ?? []);
-        } else {
-          setClients([]);
-        }
-        const resP = await axiosClient.get('products');
-        setProducts(resP?.data ?? []);
+      const errors = [];
 
-        // carga usuarios y filtra a quienes pueden repartir
-        const resU = await axiosClient.get('users'); // /api/users
-        const cour = (resU?.data ?? []).filter(u => !!u.canDeliver);
-        setCouriers(cour);
+      // Clientes
+      try {
+        const resC = await getClients(); // helper sin ownerId
+        setClients(resC?.data ?? []);
       } catch (e) {
-        console.error(e);
-        Swal.fire('Error', 'No fue posible cargar clientes, productos o repartidores.', 'error');
+        console.error('Error cargando clientes:', e);
+        errors.push('clientes');
+      }
+
+      // Productos (respetar sort_order si viene; fallback por name)
+      try {
+        const resP = await axiosClient.get('products');
+        const list = resP?.data ?? [];
+        // Ordenar por sort_order ASC (si existe), luego por name
+        list.sort((a, b) => {
+          const sa = Number(a.sort_order ?? a.sortOrder ?? 1000);
+          const sb = Number(b.sort_order ?? b.sortOrder ?? 1000);
+          if (sa !== sb) return sa - sb;
+          return (a?.name || '').localeCompare(b?.name || '', 'es', { sensitivity: 'base' });
+        });
+        setProducts(list);
+      } catch (e) {
+        console.error('Error cargando productos:', e);
+        errors.push('productos');
+      }
+
+      // Repartidores
+      try {
+        const resCour = await axiosClient.get('couriers'); // /api/couriers
+        setCouriers(resCour?.data ?? []);
+      } catch (e) {
+        console.error('Error cargando repartidores:', e);
+        errors.push('repartidores');
+      }
+
+      if (errors.length) {
+        Swal.fire('Error', `No fue posible cargar ${errors.join(', ')}.`, 'error');
       }
     })();
   }, []);
+
+  // Preseleccionar cliente si vienen con ?clientId=...
+  useEffect(() => {
+    const { clientId } = router.query || {};
+    if (!clientId || !clients.length) return;
+
+    const c = clients.find((x) => String(x.id) === String(clientId));
+    if (!c) return;
+
+    const opt = {
+      value: c.id,
+      label: `${c.name || '—'}${c?.nombre_local ? ` — ${c.nombre_local}` : ''}`,
+      __search__: `${c.name || ''} ${c.nombre_local || ''}`.toLowerCase(),
+      raw: c,
+    };
+    setClientOpt(opt);
+  }, [router.query, clients]);
 
   // ---------- Opciones de Select ----------
   const clientOptions = useMemo(
@@ -96,15 +168,16 @@ const NewOrder = () => {
 
   // ---------- Handlers ----------
   const addItem = () =>
-    setItems((prev) => [...prev, { id: uuidv4(), product: null, qty: 1, price: '' }]);
+    setItems((prev) => [...prev, { id: uuidv4(), product: null, qty: '', price: '' }]);
 
   const removeItem = (id) => setItems((prev) => prev.filter((it) => it.id !== id));
 
   const updateItem = (id, patch) =>
     setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
 
-  const todayISO = () => {
+  const weekAgoISO = () => {
     const d = new Date();
+    d.setDate(d.getDate() - 7);
     const yyyy = d.getFullYear();
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     const dd = String(d.getDate()).padStart(2, '0');
@@ -145,6 +218,10 @@ const NewOrder = () => {
       Swal.fire('Falta estado', 'Selecciona el estado del pedido', 'warning');
       return false;
     }
+    if (!paymentMethod?.value) {
+      Swal.fire('Falta método de pago', 'Selecciona el método de pago', 'warning');
+      return false;
+    }
     return true;
   };
 
@@ -156,67 +233,57 @@ const NewOrder = () => {
     try {
       setIsSubmitting(true);
       const seller = getCurrentSeller?.();
-
       const client = clients.find((c) => c.id === clientOpt.value);
 
+      // construir items en snake_case para la API
       const builtItems = items.map((it) => {
         const p = products.find((pp) => pp.id === it.product.value);
         return {
-          productId: p?.id,
+          product_id: p?.id,
           name: p?.name,
           sku: p?.sku,
-          imageUrl: p?.imageUrl ?? p?.image_url ?? null,
+          image_url: toUrlOrNull(p?.imageUrl ?? p?.image_url), // <== evita Invalid url
           qty: Number(it.qty),
           price: Number(it.price),
           subtotal: Number(it.qty) * Number(it.price),
         };
       });
 
-      const order = {
-        id: uuidv4(),
-        clientId: client?.id,
-        clientName: client?.name,
-        clientLocal: client?.nombre_local,
-        sellerId: seller?.id || null,
-        deliveredBy: selectedCourierId || null,   // repartidor asignado (opcional)
+      // payload en snake_case (lo que espera /api/orders POST)
+      const payload = {
+        client_id: client?.id,
+        client_name: client?.name,
+        client_local: client?.nombre_local ?? null,
+        client_owner: client?.clientOwner ?? client?.client_owner ?? null,
+
+        seller_id: seller?.id || null,
+        delivered_by: selectedCourierId || null,
+
         items: builtItems,
         total,
-        status: norm(status.value),               // 'pendiente' | 'entregado'
-        deliveryDate,                             // YYYY-MM-DD
-        invoice: Boolean(invoice),                // true/false
-        createdAt: new Date().toISOString(),
+        status: norm(status.value),                 // 'pendiente' | 'entregado'
+        payment_method: norm(paymentMethod.value),  // 'efectivo'|'transferencia'|'cheque'
+        delivery_date: deliveryDate,                // YYYY-MM-DD
+        invoice: Boolean(invoice),
       };
 
-      await axiosClient.post('orders', order);
-
-      if (norm(status.value) === 'entregado') {
-        const sale = {
-          id: uuidv4(),
-          orderId: order.id,
-          clientId: order.clientId,
-          clientName: order.clientName,
-          sellerId: order.sellerId,
-          items: order.items,
-          total: order.total,
-          invoice: order.invoice,
-          deliveredAt: new Date().toISOString(),
-        };
-        try {
-          await axiosClient.post('sales', sale);
-        } catch (e) {
-          console.warn('No se pudo registrar en ventas automáticamente:', e?.message || e);
-        }
-      }
-
+      await axiosClient.post('orders', payload);
       await Swal.fire('¡Creado!', 'El pedido se registró correctamente.', 'success');
       router.push('/orders');
     } catch (error) {
       console.error(error);
-      Swal.fire('Error', 'No se pudo crear el pedido.', 'error');
+      Swal.fire('Error', error?.response?.data?.error || 'No se pudo crear el pedido.', 'error');
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  // Datos derivados útiles
+  const selectedClientOwner = useMemo(() => {
+    const raw = clientOpt?.raw;
+    const owner = raw?.clientOwner ?? raw?.client_owner ?? '';
+    return owner ? String(owner).toLowerCase() : '';
+  }, [clientOpt]);
 
   return (
     <Layout>
@@ -243,7 +310,7 @@ const NewOrder = () => {
           onSubmit={handleSubmit}
         >
           {/* Cliente */}
-          <div className="mb-5">
+          <div className="mb-3">
             <label className="block text-sm font-medium text-coffee mb-1">
               Cliente
             </label>
@@ -257,6 +324,12 @@ const NewOrder = () => {
               components={{ IndicatorSeparator: () => null }}
               styles={{ control: (b) => ({ ...b, borderColor: '#e5e7eb', boxShadow: 'none' }) }}
             />
+            {/* Móvil: pill bajo el selector */}
+            {selectedClientOwner ? (
+              <div className="mt-2 sm:hidden">
+                {ownerPill(selectedClientOwner)}
+              </div>
+            ) : null}
           </div>
 
           {/* Items */}
@@ -316,8 +389,9 @@ const NewOrder = () => {
                       className="w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm"
                       value={it.qty}
                       onChange={(e) =>
-                        updateItem(it.id, { qty: e.target.value.replace(/[^\d]/g, '') || 1 })
+                        updateItem(it.id, { qty: e.target.value.replace(/[^\d]/g, '') })
                       }
+                      placeholder="0"
                     />
                   </div>
 
@@ -339,6 +413,7 @@ const NewOrder = () => {
                         onChange={(e) =>
                           updateItem(it.id, { price: e.target.value.replace(/[^\d.]/g, '') })
                         }
+                        placeholder="0"
                       />
                     </div>
                   </div>
@@ -368,8 +443,8 @@ const NewOrder = () => {
             </div>
           </div>
 
-          {/* Fecha de entrega + Estado + Factura + Repartidor */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-5">
+          {/* Fecha de entrega + Estado + Pago + Factura + Repartidor */}
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-5">
             {/* Fecha */}
             <div className="md:col-span-1">
               <label className="block text-sm font-medium text-coffee mb-1">
@@ -379,12 +454,11 @@ const NewOrder = () => {
                 <span className="absolute left-3 top-2.5 text-gray-400">
                   <Calendar size={16} />
                 </span>
-                <input
-                  type="date"
+                <DateInput
                   className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 shadow-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-sm"
                   value={deliveryDate}
                   onChange={(e) => setDeliveryDate(e.target.value)}
-                  min={todayISO()}
+                  min={weekAgoISO()}
                 />
               </div>
             </div>
@@ -396,6 +470,19 @@ const NewOrder = () => {
                 options={CREATE_STATUS_OPTIONS}
                 value={status}
                 onChange={setStatus}
+                classNamePrefix="rs"
+                components={{ IndicatorSeparator: () => null }}
+                styles={{ control: (b) => ({ ...b, borderColor: '#e5e7eb', boxShadow: 'none' }) }}
+              />
+            </div>
+
+            {/* Método de pago */}
+            <div className="md:col-span-1">
+              <label className="block text-sm font-medium text-coffee mb-1">Método de pago</label>
+              <Select
+                options={PAYMENT_OPTIONS}
+                value={paymentMethod}
+                onChange={setPaymentMethod}
                 classNamePrefix="rs"
                 components={{ IndicatorSeparator: () => null }}
                 styles={{ control: (b) => ({ ...b, borderColor: '#e5e7eb', boxShadow: 'none' }) }}
@@ -418,28 +505,34 @@ const NewOrder = () => {
             {/* Repartidor */}
             <div className="md:col-span-1">
               <label className="block text-sm font-medium text-coffee mb-1">
-                Repartidor asignado
+                Repartidor
               </label>
               <select
                 value={selectedCourierId}
                 onChange={(e) => setSelectedCourierId(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600"
               >
-                <option value="">— Seleccionar —</option>
+                <option value="">— Elegir —</option>
                 {couriers.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.name} ({c.role})
+                    {c.name}
                   </option>
                 ))}
               </select>
             </div>
           </div>
 
-          {/* Total */}
+          {/* Total + resumen inferior */}
           <div className="flex items-center justify-between border-t border-gray-200 pt-4">
-            <div className="text-sm text-gray-500 flex items-center gap-2">
-              <User size={16} className="text-gray-400" />
-              {clientOpt?.label || 'Sin cliente'}
+            <div className="text-sm text-gray-500 flex items-center gap-3 flex-wrap">
+              <span className="inline-flex items-center gap-2 text-coffee">
+                <User size={16} className="text-gray-400" />
+                {clientOpt?.label || 'Sin cliente'}
+              </span>
+              {/* Escritorio: pill abajo junto al nombre */}
+              <span className="hidden sm:inline">
+                {selectedClientOwner ? ownerPill(selectedClientOwner) : null}
+              </span>
             </div>
             <div className="text-lg font-semibold text-coffee">
               Total: {CLP.format(total || 0)}

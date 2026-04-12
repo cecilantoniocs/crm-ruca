@@ -4,15 +4,19 @@ import { useFormik } from 'formik';
 import * as Yup from 'yup';
 import { useRouter } from 'next/router';
 import Image from 'next/image';
+import Head from 'next/head';
 import axios from 'axios';
 
-const logoUrl =
-  process.env.NEXT_PUBLIC_BRAND_LOGO_URL || '/brand/rucapellan-logo.png';
+// Ruta fija en /public (asegúrate del nombre exacto y mayúsculas/minúsculas)
+const LOGO_SRC = '/brand/rucapellan-logo.png';
 
 export default function LoginPage() {
   const router = useRouter();
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // control de fallback: si falla <Image>, mostramos <img>
+  const [useFallbackImg, setUseFallbackImg] = useState(false);
 
   // Si ya hay sesión, redirige fuera del login
   useEffect(() => {
@@ -23,7 +27,9 @@ export default function LoginPage() {
       const next = router.query.next ? decodeURIComponent(router.query.next) : '/';
       router.replace(next);
     }
-  }, [router, router.query.next]);
+  // Solo re-ejecutar si cambia el parámetro next, no en cada cambio del router
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, router.query.next]);
 
   const formik = useFormik({
     initialValues: { email: '', password: '' },
@@ -60,30 +66,57 @@ export default function LoginPage() {
 
   return (
     <div className="relative min-h-screen bg-gradient-to-br from-gray-50 via-white to-[#F3D500]/15">
+      <Head>
+        {/* PWA / meta mínima */}
+        <meta name="mobile-web-app-capable" content="yes" />
+
+        {/* Preload del logo */}
+        <link rel="preload" as="image" href={LOGO_SRC} fetchpriority="high" />
+
+        <link rel="icon" href="/favicon.ico" />
+      </Head>
+
       {/* fondo sutil con patrón */}
       <div className="pointer-events-none absolute inset-0 [mask-image:radial-gradient(70%_50%_at_50%_0%,#000_0%,transparent_70%)]">
         <div className="h-full w-full bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:20px_20px]" />
       </div>
 
-      {/* movemos la tarjeta un poco hacia arriba */}
+      {/* tarjeta centrada */}
       <div className="relative z-10 min-h-screen flex items-start justify-center px-4 pt-10 md:pt-16">
         <div className="w-full max-w-md">
           {/* Tarjeta */}
           <div className="rounded-2xl border border-gray-200 bg-white/80 backdrop-blur-sm shadow-xl p-6 sm:p-8">
             {/* Marca */}
             <div className="flex flex-col items-center text-center">
-              <div className="mb-4">
-                <Image
-                  src={logoUrl}
-                  alt="Rucapellán"
-                  width={160}
-                  height={160}
-                  className="h-40 w-40 object-contain"
-                  priority
-                />
+              <div className="mb-4 h-40 w-40">
+                {useFallbackImg ? (
+                  <img
+                    src={LOGO_SRC}
+                    alt="Rucapellán"
+                    width={200}
+                    height={200}
+                    loading="eager"
+                    decoding="sync"
+                    fetchpriority="high"
+                    className="h-40 w-40 object-contain"
+                  />
+                ) : (
+                  <Image
+                    src={LOGO_SRC}
+                    alt="Rucapellán"
+                    width={200}
+                    height={200}
+                    priority
+                    decoding="sync"
+                    fetchPriority="high"
+                    className="h-40 w-40 object-contain"
+                    unoptimized
+                    onError={() => setUseFallbackImg(true)}
+                  />
+                )}
               </div>
               <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-coffee">
-                CRM <span className="text-coffee">Ruca</span>
+                Rook<span className="text-coffee">App</span>
               </h1>
             </div>
 
@@ -142,7 +175,7 @@ export default function LoginPage() {
             {/* Pie de tarjeta */}
             <div className="mt-6 text-center">
               <div className="inline-flex items-center gap-2 rounded-lg bg-[rgb(39,39,38)] px-3 py-1.5 text-xs font-medium text-white shadow-sm">
-                <span>CRM-Ruca v1.0</span>
+                <span>RookApp v6.0</span>
                 <span className="opacity-70">•</span>
                 <span>Developed by Cecil ⚡</span>
               </div>

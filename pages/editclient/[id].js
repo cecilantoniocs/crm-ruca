@@ -6,9 +6,16 @@ import { useFormik } from 'formik';
 import * as Yup from 'yup';
 import axiosClient from '../../config/axios';
 import Swal from 'sweetalert2';
-import { ArrowLeft, Save } from 'lucide-react';
+import { ArrowLeft, Save, Clock } from 'lucide-react';
 
-// helpers
+const fmtDateTime = (iso) => {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('es-CL', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+};
+
 const normalizePhoneCL = (val) => {
   if (!val) return '';
   const digits = val.replace(/[^\d]/g, '');
@@ -70,8 +77,8 @@ const EditClient = () => {
       email: client?.email || '',
       rut: client?.rut || '',
       razon_social: client?.razon_social || '',
-      clientType: client?.clientType || client?.client_type || 'b2b',   // ← minúsculas
-      clientOwner: client?.clientOwner || client?.client_owner || '',   // ← obligatorio en UI
+      clientType: (client?.clientType || client?.client_type || 'b2b'),
+      clientOwner: client?.clientOwner || client?.client_owner || '',
     },
     validationSchema: Yup.object({
       name: Yup.string().required('El nombre es obligatorio'),
@@ -80,7 +87,8 @@ const EditClient = () => {
       zona: Yup.string().required('La zona es obligatoria'),
       ciudad: Yup.string().required('La ciudad es obligatoria'),
       telefono: Yup.string().matches(/^\d+$/, 'Solo números').min(8, 'Muy corto').max(9, 'Muy largo').required('El teléfono es obligatorio'),
-      email: Yup.string().email('Email inválido').required('El email es obligatorio'),
+      // EMAIL OPCIONAL:
+      email: Yup.string().email('Email inválido').nullable(),
       rut: Yup.string().test('rut-basic', 'RUT inválido (ej: 12345678-9)', validateRutBasic),
       razon_social: Yup.string(),
       clientType: Yup.mixed().oneOf(['b2b','b2c']).required(),
@@ -95,9 +103,10 @@ const EditClient = () => {
           ...val,
           telefono: telefonoFull,
           rut: normalizeRut(val.rut),
-          // normalizamos a minúsculas para la API
-          clientType: String(val.clientType || 'b2b').toLowerCase(),
+          clientType: val.clientType,
           clientOwner: val.clientOwner ? String(val.clientOwner).toLowerCase() : null,
+          // si email vacío -> null
+          email: val.email && val.email.trim() ? val.email.trim().toLowerCase() : null,
         };
 
         await axiosClient.patch(`clients/${id}`, payload);
@@ -253,10 +262,11 @@ const EditClient = () => {
                 <select
                   id="clientOwner"
                   name="clientOwner"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600 text-sm bg-white"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600 text-sm bg-white"
                   value={formik.values.clientOwner}
                   onChange={(e) => formik.setFieldValue('clientOwner', e.target.value)}
                   onBlur={formik.handleBlur}
+                  required
                 >
                   <option value="">{'— Selecciona —'}</option>
                   <option value="rucapellan">Rucapellan</option>
@@ -286,7 +296,7 @@ const EditClient = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-coffee-900 mb-1">Razón social</label>
+                <label className="block text-sm font-medium text-coffee-900 mb-1">Razón social (opcional)</label>
                 <input
                   id="razon_social"
                   type="text"
@@ -296,7 +306,15 @@ const EditClient = () => {
               </div>
             </div>
 
-            <div className="mt-6 flex items-center justify-end gap-3">
+            {/* Metadata */}
+            <div className="mt-6 flex items-center gap-4 border-t border-gray-100 pt-4 text-xs text-gray-400">
+              <Clock size={13} className="shrink-0" />
+              <span>Creado: <span className="text-gray-500 font-medium">{fmtDateTime(client?.createdAt)}</span></span>
+              <span className="text-gray-200">|</span>
+              <span>Modificado: <span className="text-gray-500 font-medium">{fmtDateTime(client?.updatedAt)}</span></span>
+            </div>
+
+            <div className="mt-4 flex items-center justify-end gap-3">
               <button
                 type="button"
                 onClick={() => router.push('/client')}

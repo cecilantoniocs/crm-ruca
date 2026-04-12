@@ -33,11 +33,20 @@ export const PERMISSIONS_SCHEMA = {
     },
   },
   sales: {
-    label: 'Ventas',
+    label: 'Ventas / Cobranza',
     actions: {
       view: 'Ver',
-      togglePaid: 'Marcar pagado',
-      toggleInvoice: 'Marcar facturado',
+      markPaid: 'Marcar pagado',
+      updateInvoice: 'Marcar facturado',
+      updatePayment: 'Cambiar método de pago',
+      kpis: 'Ver KPIs',
+    },
+  },
+  clientAccount: {
+    label: 'Cuenta del Cliente',
+    actions: {
+      read: 'Ver cuenta',
+      charge: 'Registrar / eliminar abonos',
     },
   },
   users: {
@@ -49,13 +58,24 @@ export const PERMISSIONS_SCHEMA = {
       delete: 'Eliminar',
     },
   },
+  // Nuevo módulo: Tracking
+  tracking: {
+    label: 'Tracking',
+    actions: {
+      view: 'Ver',
+    },
+  },
+  analytics: {
+    label: 'Analytics',
+    actions: {
+      view: 'Ver dashboard',
+    },
+  },
 };
 
 // ==============================
-// 2) Plantillas por rol
+// helpers internos
 // ==============================
-
-// Helpers de construcción
 export function emptyPermissions() {
   const out = {};
   for (const mod of Object.keys(PERMISSIONS_SCHEMA)) {
@@ -95,47 +115,139 @@ function allFalse() {
   return emptyPermissions();
 }
 
+// ==============================
+// 2) Plantillas por rol
+// ==============================
 export const ROLE_TEMPLATES = {
-  admin: allTrue(),
+  admin: allTrue(), // Admin todo true
+
   repartidor: mergeFalse(allFalse(), {
     clients: { view: true, create: true, edit: true },
     orders: { view: true, create: true, edit: true, markDelivered: true },
     products: { view: true },
-    sales: { view: true },
-    users: {}, // nada
+    sales: { view: true, markPaid: true },
+    clientAccount: { read: true, charge: true },
+    // tracking: { view: false } // por defecto no
   }),
+
   vendedor: mergeFalse(allFalse(), {
     clients: { view: true, create: true, edit: true },
     orders: { view: true, create: true, edit: true },
     products: { view: true },
-    sales: { view: true, togglePaid: true },
+    sales: {
+      view: true,
+      markPaid: true,
+      updateInvoice: false,
+      updatePayment: false,
+      // kpis: true,
+    },
+    clientAccount: { read: true, charge: true },
+    // tracking: { view: false }
   }),
+
   supervisor: mergeFalse(allFalse(), {
     clients: { view: true, edit: true },
     orders: { view: true, edit: true, markDelivered: true },
     products: { view: true, edit: true },
-    sales: { view: true, togglePaid: true, toggleInvoice: true },
+    sales: {
+      view: true,
+      markPaid: true,
+      updateInvoice: true,
+      updatePayment: true,
+      kpis: true,
+    },
     users: { view: true },
+    clientAccount: { read: true, charge: true },
+    tracking: { view: true }, // <- puede ver Tracking
+    analytics: { view: true },
   }),
-  // role 'client' no usa permisos de backoffice
+
+  produccion: mergeFalse(allFalse(), {
+    products: { view: true, edit: true },
+    clients: { view: true },
+    orders: { view: true },
+    sales: { view: true },
+    clientAccount: { read: true },
+    // tracking: { view: false }
+  }),
 };
 
 export function templateForRole(role) {
   const r = String(role || '').toLowerCase();
   const tpl = ROLE_TEMPLATES[r] || emptyPermissions();
-  // devolver copia para evitar mutaciones globales
   return JSON.parse(JSON.stringify(tpl));
 }
 
 // ==============================
-// 3) Normalización de permisos/usuario
+// 3) Normalización tokens <-> objeto y usuario
 // ==============================
+
+// Convierte lista de tokens ("module:action") a objeto booleans por módulo/acción
+export function tokensToPermsObject(list = []) {
+  const out = emptyPermissions();
+  const has = (k) => list.some((p) => String(p).toLowerCase() === String(k).toLowerCase());
+
+  // clients
+  out.clients.view   = has('clients:read');
+  out.clients.create = has('clients:create');
+  out.clients.edit   = has('clients:update');
+  out.clients.delete = has('clients:delete');
+
+  // orders
+  out.orders.view          = has('orders:read') || has('orders:update') || has('orders:create') || has('orders:delete');
+  out.orders.create        = has('orders:create');
+  out.orders.edit          = has('orders:update');
+  out.orders.delete        = has('orders:delete');
+  out.orders.markDelivered = has('orders:update');
+
+  // products
+  out.products.view   = has('products:read') || has('products:update') || has('products:create') || has('products:delete');
+  out.products.create = has('products:create');
+  out.products.edit   = has('products:update');
+  out.products.delete = has('products:delete');
+
+  // sales (granular) + legacy fallback 'sales:update'
+  out.sales.view          = has('sales:read') || has('sales:update');
+  out.sales.markPaid      = has('sales.mark_paid') || has('sales:update');
+  out.sales.updateInvoice = has('sales.update_invoice') || has('sales:update');
+  out.sales.updatePayment = has('sales.update_payment') || has('sales:update');
+  out.sales.kpis          = has('sales.kpis.view') || has('sales:update');
+
+  // clientAccount
+  out.clientAccount.read   = has('client.account.read');
+  out.clientAccount.charge = has('client.account.charge');
+
+  // tracking (acepta varias formas)
+  out.tracking.view =
+    has('tracking:view') ||
+    has('tracking.view') ||
+    has('tracking:read') ||
+    has('tracking.read') ||
+    has('gps:view') ||
+    has('gps.read') ||
+    has('locations:view') ||
+    has('locations.read');
+
+  // analytics
+  out.analytics.view = has('analytics:view') || has('analytics.view') || has('analytics:read');
+
+  // users
+  out.users.view   = has('users:read') || has('users:update') || has('users:create') || has('users:delete');
+  out.users.create = has('users:create');
+  out.users.edit   = has('users:update');
+  out.users.delete = has('users:delete');
+
+  return out;
+}
+
 export function normalizePermissions(perms, role) {
-  // Si no vienen permisos, tomamos plantilla por rol
-  const base = perms && typeof perms === 'object' ? perms : {};
+  const base =
+    Array.isArray(perms) ? tokensToPermsObject(perms)
+    : perms && typeof perms === 'object' ? perms
+    : {};
+
   const withRole = mergeDeep(templateForRole(role), base);
 
-  // Garantizar todas las claves módulo/acción del esquema
   const out = {};
   for (const mod of Object.keys(PERMISSIONS_SCHEMA)) {
     out[mod] = {};
@@ -152,22 +264,30 @@ export function normalizeUser(user) {
   if (!user || typeof user !== 'object') return null;
   const role = user.role || (user.isAdmin ? 'admin' : user.role) || '';
   const isAdm = user.isAdmin || String(role).toLowerCase() === 'admin';
+  // Si viene array de tokens desde backend, convertir antes de normalizar
+  const permsInput = Array.isArray(user.permissions)
+    ? tokensToPermsObject(user.permissions)
+    : user.permissions;
+
   return {
     id: user.id ?? null,
     name: user.name ?? '',
     email: user.email ?? '',
     role,
     isAdmin: Boolean(isAdm),
-    // permisos normalizados
-    permissions: normalizePermissions(user.permissions, role),
-    // metadatos opcionales que podrías usar
-    partnerTag: user.partnerTag ?? null, // "Cecil" / "Padre" / etc.
+    permissions: normalizePermissions(permsInput, role),
+    partnerTag: user.partnerTag ?? user.partner_tag ?? null,
     sellerId: user.sellerId ?? user.id ?? null,
+
+    // flags reparto
+    canDeliver: user.canDeliver ?? user.can_deliver ?? false,
+    can_deliver: user.can_deliver ?? user.canDeliver ?? false,
   };
 }
 
+
 // ==============================
-// 4) Acceso seguro a localStorage (SSR-safe)
+// 4) localStorage helpers
 // ==============================
 const LS_KEY = 'userData';
 
@@ -187,12 +307,9 @@ export function setCurrentUser(userObj) {
   try {
     const normalized = normalizeUser(userObj);
     localStorage.setItem(LS_KEY, JSON.stringify(normalized));
-  } catch {
-    // noop
-  }
+  } catch {}
 }
 
-// Asegura que el usuario guardado quede normalizado (puedes llamarlo en _app o al iniciar sesión)
 export function ensureStoredUserNormalized() {
   if (typeof window === 'undefined') return null;
   const u = getCurrentUser();
@@ -202,16 +319,14 @@ export function ensureStoredUserNormalized() {
 }
 
 // ==============================
-// 5) Chequeos de permisos
+// 5) helpers can / canAny / isAdmin
 // ==============================
-
 export function isAdmin(user = getCurrentUser()) {
   return Boolean(user?.isAdmin);
 }
 
 /**
- * can('orders.edit')  o  can('orders','edit')
- * Retorna true si el usuario puede realizar la acción.
+ * can('orders.edit')  o  can('orders','edit')  o  can('sales.kpis.view')
  */
 export function can(moduleOrDot, actionOpt, user = getCurrentUser()) {
   if (!user) return false;
@@ -221,7 +336,10 @@ export function can(moduleOrDot, actionOpt, user = getCurrentUser()) {
   let act = actionOpt;
 
   if (actionOpt == null && typeof moduleOrDot === 'string' && moduleOrDot.includes('.')) {
-    const [m, a] = moduleOrDot.split('.');
+    // Soporta acciones con varios puntos ('kpis.view', 'account.read', etc.)
+    const firstDot = moduleOrDot.indexOf('.');
+    const m = moduleOrDot.slice(0, firstDot);
+    const a = moduleOrDot.slice(firstDot + 1);
     mod = m;
     act = a;
   }
@@ -231,16 +349,17 @@ export function can(moduleOrDot, actionOpt, user = getCurrentUser()) {
   if (!mod || !act) return false;
 
   const perms = user.permissions || {};
+  // Compatibilidad: si no existe 'kpis.view' intenta 'kpis'
+  if (act.includes('.') && !(perms?.[mod]?.[act])) {
+    const head = act.split('.')[0];
+    return Boolean(perms?.[mod]?.[head]);
+  }
   return Boolean(perms?.[mod]?.[act]);
 }
 
-/**
- * canAny(['orders.edit','orders.delete'])  o  canAny([['orders','edit'], ...])
- */
 export function canAny(permsList = [], user = getCurrentUser()) {
   if (!user) return false;
   if (user.isAdmin) return true;
-
   for (const entry of permsList) {
     if (Array.isArray(entry)) {
       const [m, a] = entry;
