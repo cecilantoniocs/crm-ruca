@@ -57,7 +57,7 @@ function isStaticPath(pathname) {
   return false;
 }
 
-export async function middleware(req) {
+export async function proxy(req) {
   const { pathname } = req.nextUrl;
 
   // Bypass total para estáticos / PWA
