@@ -39,8 +39,8 @@ self.addEventListener('push', (event) => {
   const title = payload.title || 'Notificación';
   const options = {
     body: payload.body || '',
-    icon: '/icon-192-maskable.png',
-    badge: '/icon-192-maskable.png',
+    icon: '/icon-192-og.png',
+    badge: '/icon-192-og.png',
     data: payload.data || {},
     vibrate: [200, 100, 200],
   };
