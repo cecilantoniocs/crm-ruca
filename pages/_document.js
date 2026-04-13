@@ -39,7 +39,7 @@ export default function Document() {
         <link rel="manifest" href="/site.webmanifest" />
 
         {/* Tema del navegador */}
-        <meta name="theme-color" content="#111827" />
+        <meta name="theme-color" content="#ffffff" />
       </Head>
       <body>
         <Main />
