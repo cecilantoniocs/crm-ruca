@@ -36,7 +36,7 @@ export default function PushNotificationButton() {
   const [status,     setStatus]     = useState(init.status);
   const [errorMsg,   setErrorMsg]   = useState(init.error);
   const [showPrompt, setShowPrompt] = useState(false);
-  const [loadStep,   setLoadStep]   = useState('');
+  const [loadStep,   setLoadStep]   = useState(''); // eslint-disable-line no-unused-vars
   const regRef = useRef(null);
 
   const saveError = (msg) => {
@@ -121,13 +121,10 @@ export default function PushNotificationButton() {
         throw Object.assign(new Error('Push no soportado en este navegador'), { name: 'UnsupportedError' });
       }
 
-      // Paso 1: permiso — DEBE iniciarse antes de cualquier await (contexto de gesto iOS)
-      setLoadStep('1/4 Permiso…');
+      // Permiso — DEBE iniciarse antes de cualquier await (contexto de gesto iOS)
       const permPromise = Notification.requestPermission();
 
-      // Paso 2: obtener registro del SW — register() resuelve inmediatamente
-      // (idempotente: devuelve el registro existente si ya está registrado)
-      setLoadStep('2/4 SW…');
+      // Registro SW — register() es idempotente y resuelve de inmediato
       const swPromise = regRef.current
         ? Promise.resolve(regRef.current)
         : navigator.serviceWorker.register('/sw.js');
@@ -141,8 +138,6 @@ export default function PushNotificationButton() {
         return;
       }
 
-      // Paso 3: subscribe
-      setLoadStep('3/4 Subscribe…');
       let sub = await reg.pushManager.getSubscription();
       if (!sub) {
         sub = await reg.pushManager.subscribe({
@@ -152,8 +147,6 @@ export default function PushNotificationButton() {
       }
       if (!sub) throw new Error('subscribe() devolvió null');
 
-      // Paso 4: guardar en servidor
-      setLoadStep('4/4 Guardando…');
       await axiosClient.post('/push/subscribe', { subscription: sub.toJSON() });
       try { localStorage.setItem(STATUS_KEY, 'active'); } catch {}
       setStatus('active');
@@ -273,7 +266,7 @@ export default function PushNotificationButton() {
             ? <BellRing size={15} className="animate-pulse" />
             : <Bell size={15} />}
           <span className="hidden sm:inline">
-            {status === 'loading' ? (loadStep || 'Activando…') : 'Notificaciones'}
+            {status === 'loading' ? 'Activando…' : 'Notificaciones'}
           </span>
         </button>
       )}
