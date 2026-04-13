@@ -514,7 +514,7 @@ const NewOrder = () => {
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white shadow-sm focus:border-brand-600 focus:ring-1 focus:ring-brand-600"
               >
                 <option value="">— Elegir —</option>
-                <option value="PICKUP">🏭 Retiro en Bodega</option>
+                <option value="PICKUP">Retiro en Bodega</option>
                 {couriers.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}

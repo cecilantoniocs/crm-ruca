@@ -330,7 +330,7 @@ export default async function handler(req, res) {
       if (isPickup) {
         // Retiro en bodega → notificar a admin y supervisores
         sendPushToRoles(['admin', 'supervisor'], {
-          title: '🏭 Retiro en Bodega',
+          title: 'Retiro en Bodega',
           body: clientLabel,
           data: { orderId, url: '/orders' },
         }).catch(() => {});

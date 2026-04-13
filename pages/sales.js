@@ -768,7 +768,7 @@ const SalesPage = () => {
               title="Repartidor"
             >
               <option value="all">Todos</option>
-              <option value="pickup">🏭 Retiro en bodega</option>
+              <option value="pickup">Retiro en bodega</option>
               {repartidores.map((r) => (
                 <option key={r.id} value={String(r.id)}>
                   {r.name || r.email || 'Repartidor'}

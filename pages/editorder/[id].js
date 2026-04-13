@@ -234,7 +234,7 @@ export default function EditOrder() {
   const courierOptions = useMemo(
     () => [
       { value: '', label: '— Elegir —' },
-      { value: 'PICKUP', label: '🏭 Retiro en Bodega' },
+      { value: 'PICKUP', label: 'Retiro en Bodega' },
       ...couriers.map((u) => ({ value: String(u.id), label: u.name || 'Usuario' })),
     ],
     [couriers]

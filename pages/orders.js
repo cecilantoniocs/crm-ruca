@@ -684,7 +684,7 @@ export default function Orders() {
               title="Repartidor"
             >
               <option value="all">Todos</option>
-              <option value="pickup">🏭 Retiro en bodega</option>
+              <option value="pickup">Retiro en bodega</option>
               {couriers.map((u) => (
                 <option key={u.id} value={String(u.id)}>{u.name || u.email || 'Repartidor'}</option>
               ))}
