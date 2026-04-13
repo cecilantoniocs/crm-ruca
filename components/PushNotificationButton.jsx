@@ -36,6 +36,7 @@ export default function PushNotificationButton() {
   const [status,     setStatus]     = useState(init.status);
   const [errorMsg,   setErrorMsg]   = useState(init.error);
   const [showPrompt, setShowPrompt] = useState(false);
+  const [loadStep,   setLoadStep]   = useState('');
   const regRef = useRef(null);
 
   const saveError = (msg) => {
@@ -115,16 +116,25 @@ export default function PushNotificationButton() {
 
     try {
       if (!supported()) {
-        throw Object.assign(new Error('Push no soportado'), { name: 'UnsupportedError' });
+        throw Object.assign(new Error('Push no soportado en este navegador'), { name: 'UnsupportedError' });
       }
 
-      // CRÍTICO iOS: requestPermission() debe iniciarse antes de cualquier await
+      // Paso 1: permiso — DEBE iniciarse antes de cualquier await (contexto de gesto iOS)
+      setLoadStep('1/4 Permiso…');
       const permPromise = Notification.requestPermission();
-      const regPromise  = regRef.current
-        ? Promise.resolve(regRef.current)
-        : navigator.serviceWorker.ready;
 
-      const [permission, reg] = await Promise.all([permPromise, regPromise]);
+      // Paso 2: SW ready — con timeout de 10s para no colgar infinitamente
+      setLoadStep('2/4 SW…');
+      const swPromise = regRef.current
+        ? Promise.resolve(regRef.current)
+        : Promise.race([
+            navigator.serviceWorker.ready,
+            new Promise((_, rej) =>
+              setTimeout(() => rej(new Error('Service Worker no respondió (timeout 10s)')), 10_000)
+            ),
+          ]);
+
+      const [permission, reg] = await Promise.all([permPromise, swPromise]);
       regRef.current = reg;
 
       if (permission !== 'granted') {
@@ -133,6 +143,8 @@ export default function PushNotificationButton() {
         return;
       }
 
+      // Paso 3: subscribe
+      setLoadStep('3/4 Subscribe…');
       let sub = await reg.pushManager.getSubscription();
       if (!sub) {
         sub = await reg.pushManager.subscribe({
@@ -142,6 +154,8 @@ export default function PushNotificationButton() {
       }
       if (!sub) throw new Error('subscribe() devolvió null');
 
+      // Paso 4: guardar en servidor
+      setLoadStep('4/4 Guardando…');
       await axiosClient.post('/push/subscribe', { subscription: sub.toJSON() });
       try { localStorage.setItem(STATUS_KEY, 'active'); } catch {}
       setStatus('active');
@@ -261,7 +275,7 @@ export default function PushNotificationButton() {
             ? <BellRing size={15} className="animate-pulse" />
             : <Bell size={15} />}
           <span className="hidden sm:inline">
-            {status === 'loading' ? 'Activando…' : 'Notificaciones'}
+            {status === 'loading' ? (loadStep || 'Activando…') : 'Notificaciones'}
           </span>
         </button>
       )}
