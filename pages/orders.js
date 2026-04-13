@@ -28,6 +28,7 @@ import usePullToRefreshWindow from '../hooks/usePullToRefreshWindow';
 // 🔹 NUEVO: traer usuario y helpers de preferencias (seguimos usando owner por prefs)
 import { getCurrentUser, can, isAdmin } from '../helpers/permissions';
 import { loadUserFilterPrefs, saveUserFilterPrefs, resolveDefaultOwner } from '../helpers/filterPrefs';
+import Pagination, { PAGE_SIZE } from '../components/Pagination';
 
 // --- helpers ---
 const norm = (v) => (v ?? '').toString().trim().toLowerCase();
@@ -155,6 +156,7 @@ export default function Orders() {
   const [debounced, setDebounced] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [page, setPage] = useState(0);
 
   // filtro por estado (por defecto Pendiente)
   const [statusFilter, setStatusFilter] = useState('pendiente');
@@ -432,6 +434,14 @@ export default function Orders() {
 
     return orders.filter((o) => inDateRange(o) && bySearch(o) && byStatus(o) && byOwner(o) && byCourier(o));
   }, [orders, debounced, clientMap, statusFilter, courierName, fromDate, toDate, ownerFilter, courierFilter]);
+
+  // Resetear página al cambiar filtros
+  useEffect(() => { setPage(0); }, [filtered]);
+
+  const paginated = useMemo(
+    () => filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE),
+    [filtered, page]
+  );
 
   const stop = (e) => e.stopPropagation();
 
@@ -723,7 +733,7 @@ export default function Orders() {
       {/* MOBILE: Cards */}
       {!loading && !loadError && filtered.length > 0 && (
         <div className="sm:hidden space-y-3 overflow-x-hidden">
-          {filtered.map((o) => {
+          {paginated.map((o) => {
             const c = clientMap.get(o.clientId);
             const addr = c?.dir1 || '';
             const items = o.items ?? [];
@@ -905,7 +915,7 @@ export default function Orders() {
                 </thead>
 
                 <tbody className="divide-y divide-gray-200">
-                  {filtered.map((o, idx) => {
+                  {paginated.map((o, idx) => {
                     const c = clientMap.get(o.clientId);
                     const addr = c?.dir1 || '';
                     const items = o.items ?? [];
@@ -1199,6 +1209,10 @@ export default function Orders() {
             </div>
           </div>
         </div>
+      )}
+
+      {!loading && !loadError && (
+        <Pagination page={page} total={filtered.length} onChange={setPage} />
       )}
     </Layout>
   );

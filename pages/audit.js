@@ -5,6 +5,7 @@ import DateInput from '../components/DateInput';
 import axiosClient from '../config/axios';
 import { ShieldCheck, Search, Filter } from 'lucide-react';
 import { isAdmin, getCurrentUser } from '../helpers/permissions';
+import Pagination, { PAGE_SIZE } from '../components/Pagination';
 
 // ── Acción → etiqueta + color ──────────────────────────────────────────────
 const ACTION_MAP = {
@@ -59,6 +60,7 @@ export default function AuditPage() {
   const [users, setUsers]       = useState([]);
   const [loading, setLoading]   = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [page, setPage]         = useState(0);
 
   // Filtros
   const [from, setFrom]           = useState(today());
@@ -103,6 +105,14 @@ export default function AuditPage() {
       (ACTION_MAP[l.action]?.label || l.action || '').toLowerCase().includes(debounced)
     );
   }, [logs, debounced]);
+
+  // Resetear página al cambiar filtros
+  useEffect(() => { setPage(0); }, [filtered]);
+
+  const paginated = useMemo(
+    () => filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE),
+    [filtered, page]
+  );
 
   // Solo admins
   if (!isAdmin(me)) {
@@ -179,6 +189,7 @@ export default function AuditPage() {
         </p>
       )}
 
+
       {loading && <p className="text-gray-500 text-sm">Cargando…</p>}
       {!loading && loadError && <p className="text-rose-600 text-sm">{loadError}</p>}
 
@@ -186,7 +197,7 @@ export default function AuditPage() {
       {!loading && !loadError && (
         <div className="sm:hidden space-y-3">
           {filtered.length === 0 && <p className="text-gray-500 text-sm">Sin registros para este período.</p>}
-          {filtered.map((l) => (
+          {paginated.map((l) => (
             <div key={l.id} className="bg-white rounded-xl border border-gray-100 shadow p-4 space-y-2">
               <div className="flex items-center justify-between">
                 <ActionBadge action={l.action} />
@@ -219,7 +230,7 @@ export default function AuditPage() {
                   </td>
                 </tr>
               )}
-              {filtered.map((l, idx) => (
+              {paginated.map((l, idx) => (
                 <tr key={l.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                   <td className="px-5 py-3 text-sm text-gray-500 whitespace-nowrap">{fmtDateTime(l.created_at)}</td>
                   <td className="px-5 py-3 text-sm font-medium text-coffee">{l.user_name || '—'}</td>
@@ -230,6 +241,10 @@ export default function AuditPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {!loading && !loadError && (
+        <Pagination page={page} total={filtered.length} onChange={setPage} />
       )}
     </Layout>
   );

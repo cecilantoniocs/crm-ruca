@@ -403,6 +403,14 @@ export default function TrackingPage() {
     } catch {}
   }, [map, points]);
 
+  // ── Reajustar Leaflet cuando el panel lateral aparece/desaparece ─────────
+  const panelVisible = courierStats.size > 0;
+  useEffect(() => {
+    if (!map) return;
+    const t = setTimeout(() => { try { map.invalidateSize(); } catch {} }, 60);
+    return () => clearTimeout(t);
+  }, [map, panelOpen, panelVisible]);
+
   // ── Centrar mapa en un courier ────────────────────────────────────────────
   const focusCourier = (cid) => {
     const stat = courierStats.get(cid);

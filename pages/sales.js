@@ -25,6 +25,7 @@ import {
 import PullToRefreshHeader from '../components/PullToRefreshHeader';
 import usePullToRefreshWindow from '../hooks/usePullToRefreshWindow';
 import { getCurrentUser, can, isAdmin } from '../helpers/permissions';
+import Pagination, { PAGE_SIZE } from '../components/Pagination';
 
 // ---------- Supabase REST client (lectura vistas) ----------
 const supa = (() => {
@@ -197,6 +198,7 @@ const SalesPage = () => {
 
   const oDate = (o) => o.deliveryDate || '';
   const [openInvoiceId, setOpenInvoiceId] = useState(null);
+  const [page, setPage] = useState(0);
 
   const { headerProps } = usePullToRefreshWindow({ onRefresh: () => refetch(), threshold: 60 });
 
@@ -480,6 +482,14 @@ const SalesPage = () => {
 
     return rows;
   }, [orders, searchTerm, fromDate, toDate, ownerFilter, courierFilter, invoiceFilter, paidFilter, paymentFilter]);
+
+  // Resetear página al cambiar filtros
+  useEffect(() => { setPage(0); }, [filtered]);
+
+  const paginated = useMemo(
+    () => filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE),
+    [filtered, page]
+  );
 
   // Totales
   const totals = useMemo(() => {
@@ -854,7 +864,7 @@ const SalesPage = () => {
         <>
           {/* MOBILE */}
           <div className="sm:hidden space-y-3">
-            {filtered.map((o, idx) => {
+            {paginated.map((o, idx) => {
               const c = clientMap.get(o.clientId);
               const owner = norm(c?.clientOwner || c?.client_owner || o.clientOwner);
               const { label: invLabel, cls: invCls } = invoiceView(o, 'sm');
@@ -1056,7 +1066,7 @@ const SalesPage = () => {
                   </thead>
 
                   <tbody className="divide-y divide-gray-200">
-                    {filtered.map((o, idx) => {
+                    {paginated.map((o, idx) => {
                       const c = clientMap.get(o.clientId);
                       const owner = norm(c?.clientOwner || c?.client_owner || o.clientOwner);
                       const courier = userMap.get(o.deliveredBy);
@@ -1272,6 +1282,10 @@ const SalesPage = () => {
             </div>
           </div>
         </>
+      )}
+
+      {!loading && !loadError && (
+        <Pagination page={page} total={filtered.length} onChange={setPage} />
       )}
     </Layout>
   );
