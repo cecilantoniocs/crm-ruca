@@ -1,11 +1,10 @@
 // components/PushNotificationButton.jsx
 import { useEffect, useState, useRef } from 'react';
-import { Bell, BellOff, BellRing, AlertCircle, X } from 'lucide-react';
+import { Bell, BellOff, BellRing, AlertCircle } from 'lucide-react';
 import axiosClient from '@/config/axios';
 
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-const STATUS_KEY       = 'pushStatus';    // 'active' | 'error:<msg>' | unset
-const DISMISSED_KEY    = 'pushDismissed';
+const STATUS_KEY       = 'pushStatus'; // 'active' | 'error:<msg>' | unset
 
 function urlBase64ToUint8Array(base64String) {
   if (!base64String) throw new Error('VAPID_PUBLIC_KEY no definida');
@@ -21,7 +20,6 @@ const supported = () =>
   'PushManager' in window &&
   'Notification' in window;
 
-// Lee el estado guardado en localStorage
 function readStored() {
   try {
     const v = localStorage.getItem(STATUS_KEY) || '';
@@ -33,10 +31,8 @@ function readStored() {
 
 export default function PushNotificationButton() {
   const init = typeof window !== 'undefined' ? readStored() : { status: 'idle', error: '' };
-  const [status,     setStatus]     = useState(init.status);
-  const [errorMsg,   setErrorMsg]   = useState(init.error);
-  const [showPrompt, setShowPrompt] = useState(false);
-  const [loadStep,   setLoadStep]   = useState(''); // eslint-disable-line no-unused-vars
+  const [status,   setStatus]   = useState(init.status);
+  const [errorMsg, setErrorMsg] = useState(init.error);
   const regRef = useRef(null);
 
   const saveError = (msg) => {
@@ -51,8 +47,6 @@ export default function PushNotificationButton() {
 
     (async () => {
       try {
-        // Usar register() en vez de .ready — register() resuelve de inmediato
-        // con el registro existente sin esperar que el SW controle la página.
         const reg = await navigator.serviceWorker.register('/sw.js');
         regRef.current = reg;
         const sub = await reg.pushManager.getSubscription();
@@ -63,18 +57,15 @@ export default function PushNotificationButton() {
           return;
         }
 
-        // No hay suscripción activa
-        const perm       = Notification.permission;
-        const storedVal  = localStorage.getItem(STATUS_KEY) || '';
-        const wasActive  = storedVal === 'active';
-        const hadError   = storedVal.startsWith('error:');
+        const perm      = Notification.permission;
+        const storedVal = localStorage.getItem(STATUS_KEY) || '';
+        const wasActive = storedVal === 'active';
+        const hadError  = storedVal.startsWith('error:');
 
-        // Si ya teníamos un error guardado, preservarlo — no pisarlo con 'idle'
-        // (el useState ya lo cargó; solo evitamos que el useEffect lo limpie)
+        // Preservar error guardado — no pisarlo con 'idle'
         if (hadError) return;
 
-        // Si el permiso está concedido pero se perdió la suscripción (bug iOS común),
-        // intentar re-suscribir silenciosamente sin pedir interacción al usuario.
+        // Permiso concedido pero suscripción perdida (bug iOS) → re-suscribir
         if (perm === 'granted' && wasActive) {
           try {
             const newSub = await reg.pushManager.subscribe({
@@ -88,44 +79,31 @@ export default function PushNotificationButton() {
               return;
             }
           } catch (e) {
-            const msg = `AutoResub: ${e?.name ?? '?'}: ${e?.message ?? ''}`;
-            saveError(msg);
+            saveError(`AutoResub: ${e?.name ?? '?'}: ${e?.message ?? ''}`);
             return;
           }
         }
 
         try { localStorage.removeItem(STATUS_KEY); } catch {}
-
-        if (perm === 'denied') {
-          setStatus('blocked');
-        } else {
-          setStatus('idle');
-          if (perm === 'default' && !localStorage.getItem(DISMISSED_KEY)) {
-            setTimeout(() => setShowPrompt(true), 1200);
-          }
-        }
-      } catch (e) {
-        // No limpiar localStorage — mantener estado previo si existía
+        setStatus(perm === 'denied' ? 'blocked' : 'idle');
+      } catch {
+        // mantener estado previo
       }
     })();
   }, []);
 
   // ── Suscribir ─────────────────────────────────────────────────────────────────
   const handleActivate = async () => {
-    setShowPrompt(false);
     setStatus('loading');
     setErrorMsg('');
-
     try {
       if (!supported()) {
         throw Object.assign(new Error('Push no soportado en este navegador'), { name: 'UnsupportedError' });
       }
 
-      // Permiso — DEBE iniciarse antes de cualquier await (contexto de gesto iOS)
+      // CRÍTICO iOS: requestPermission() debe iniciarse antes de cualquier await
       const permPromise = Notification.requestPermission();
-
-      // Registro SW — register() es idempotente y resuelve de inmediato
-      const swPromise = regRef.current
+      const swPromise   = regRef.current
         ? Promise.resolve(regRef.current)
         : navigator.serviceWorker.register('/sw.js');
 
@@ -152,12 +130,11 @@ export default function PushNotificationButton() {
       setStatus('active');
     } catch (e) {
       console.error('[Push]', e?.name, e?.message);
-      const label = `${e?.name ?? 'Error'}: ${e?.message ?? ''}`;
       if (e?.name === 'NotAllowedError') {
         try { localStorage.removeItem(STATUS_KEY); } catch {}
         setStatus('blocked');
       } else {
-        saveError(label);
+        saveError(`${e?.name ?? 'Error'}: ${e?.message ?? ''}`);
       }
     }
   };
@@ -166,7 +143,7 @@ export default function PushNotificationButton() {
   const handleDeactivate = async () => {
     setStatus('loading');
     try {
-      const reg = regRef.current ?? await navigator.serviceWorker.ready;
+      const reg = regRef.current ?? await navigator.serviceWorker.register('/sw.js');
       const sub = await reg.pushManager.getSubscription();
       if (sub) {
         await axiosClient.delete('/push/subscribe', { data: { endpoint: sub.endpoint } });
@@ -180,47 +157,10 @@ export default function PushNotificationButton() {
     }
   };
 
-  const dismissPrompt = () => {
-    try { localStorage.setItem(DISMISSED_KEY, 'true'); } catch {}
-    setShowPrompt(false);
-  };
-
   if (status === 'unsupported') return null;
 
   return (
     <>
-      {/* Modal primer uso */}
-      {showPrompt && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 px-4 pb-8 sm:pb-0">
-          <div className="w-full max-w-sm rounded-2xl bg-white shadow-2xl p-6 space-y-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="h-12 w-12 shrink-0 rounded-full bg-brand-50 border border-brand-200 flex items-center justify-center">
-                  <Bell size={22} className="text-brand-600" />
-                </div>
-                <div>
-                  <p className="font-semibold text-gray-900">Notificaciones</p>
-                  <p className="text-sm text-gray-500 mt-0.5">Recibe alertas cuando te asignen un pedido</p>
-                </div>
-              </div>
-              <button onClick={dismissPrompt} className="shrink-0 text-gray-400 hover:text-gray-500 p-1 -mt-1 -mr-1">
-                <X size={18} />
-              </button>
-            </div>
-            <button
-              onClick={handleActivate}
-              className="w-full rounded-xl bg-brand-500 py-3 text-sm font-semibold text-white hover:bg-brand-600 active:opacity-90 transition"
-            >
-              Activar notificaciones
-            </button>
-            <button onClick={dismissPrompt} className="w-full py-1 text-sm text-gray-400 hover:text-gray-600">
-              Ahora no
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Bloqueado */}
       {status === 'blocked' && (
         <span
           title="Notificaciones bloqueadas. Ve a Configuración → Notificaciones y permite el acceso a esta app."
@@ -231,10 +171,10 @@ export default function PushNotificationButton() {
         </span>
       )}
 
-      {/* Error — muestra el mensaje para poder diagnosticar */}
       {status === 'error' && (
         <button
           onClick={handleActivate}
+          title={`Error: ${errorMsg} — toca para reintentar`}
           className="flex items-center gap-1.5 text-xs text-red-500 hover:text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 transition-colors max-w-[200px]"
         >
           <AlertCircle size={15} className="shrink-0" />
@@ -242,7 +182,6 @@ export default function PushNotificationButton() {
         </button>
       )}
 
-      {/* Activo */}
       {status === 'active' && (
         <button
           onClick={handleDeactivate}
@@ -254,7 +193,6 @@ export default function PushNotificationButton() {
         </button>
       )}
 
-      {/* Idle / Loading */}
       {(status === 'idle' || status === 'loading') && (
         <button
           onClick={handleActivate}
