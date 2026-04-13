@@ -172,12 +172,19 @@ export default async function handler(req, res) {
         return qy;
       };
 
+      // Sin filtro de fechas: limitar para no traer todo el historial
+      const buildQueryFinal = (cols) => {
+        let qy = buildQuery(cols);
+        if (!from && !to) qy = qy.limit(2000);
+        return qy;
+      };
+
       // intento con items
-      let { data, error } = await buildQuery(colsWithItems);
+      let { data, error } = await buildQueryFinal(colsWithItems);
       // fallback sin items si falla la relación
       if (error) {
         console.warn('[orders] fallback sin order_items por error:', error?.message || error);
-        const retry = await buildQuery(baseCols);
+        const retry = await buildQueryFinal(baseCols);
         data = retry.data;
         error = retry.error;
       }
