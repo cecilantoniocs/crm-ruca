@@ -59,12 +59,14 @@ export default async function handler(req, res) {
 
     // Cuando se consulta por cliente, traer TODOS sus pedidos sin límite artificial
     if (clientId) {
-      query = query.eq('client_id', clientId);
+      query = query.eq('client_id', clientId).limit(10000);
     } else if (!fromDate && !toDate) {
       // Sin filtro de fechas: limitar para no traer todo el historial
       query = query.limit(2000);
+    } else {
+      // Con filtro de fechas: límite alto explícito (PostgREST usa su default de 1000 si no se especifica)
+      query = query.limit(10000);
     }
-    // Con filtro de fechas: sin límite — el rango ya acota los datos
 
     // Fechas (YYYY-MM-DD)
     if (fromDate) query = query.gte('delivery_date', fromDate);

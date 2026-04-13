@@ -173,9 +173,11 @@ export default async function handler(req, res) {
       };
 
       // Sin filtro de fechas: limitar para no traer todo el historial
+      // Con filtro de fechas: límite alto explícito (PostgREST usa su default de 1000 si no se especifica)
       const buildQueryFinal = (cols) => {
         let qy = buildQuery(cols);
         if (!from && !to) qy = qy.limit(2000);
+        else qy = qy.limit(10000);
         return qy;
       };
 
