@@ -61,8 +61,14 @@ export default function PushNotificationButton() {
         }
 
         // No hay suscripción activa
-        const perm      = Notification.permission;
-        const wasActive = localStorage.getItem(STATUS_KEY) === 'active';
+        const perm       = Notification.permission;
+        const storedVal  = localStorage.getItem(STATUS_KEY) || '';
+        const wasActive  = storedVal === 'active';
+        const hadError   = storedVal.startsWith('error:');
+
+        // Si ya teníamos un error guardado, preservarlo — no pisarlo con 'idle'
+        // (el useState ya lo cargó; solo evitamos que el useEffect lo limpie)
+        if (hadError) return;
 
         // Si el permiso está concedido pero se perdió la suscripción (bug iOS común),
         // intentar re-suscribir silenciosamente sin pedir interacción al usuario.
@@ -79,7 +85,6 @@ export default function PushNotificationButton() {
               return;
             }
           } catch (e) {
-            // Re-subscribe silencioso falló — guardar error para diagnosticar
             const msg = `AutoResub: ${e?.name ?? '?'}: ${e?.message ?? ''}`;
             saveError(msg);
             return;
