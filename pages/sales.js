@@ -184,8 +184,11 @@ const SalesPage = () => {
   // Filtros
   const [searchTerm, setSearchTerm] = useState('');
   const [quickRange, setQuickRange] = useState('month'); // 'today' | 'week' | 'month' | 'range'
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
+  const [fromDate, setFromDate] = useState(() => {
+    const now = new Date();
+    return toYMDLocal(new Date(now.getFullYear(), now.getMonth(), 1));
+  });
+  const [toDate, setToDate] = useState(() => toYMDLocal(new Date()));
 
   // cartera, repartidor, método de pago
   const [ownerFilter, setOwnerFilter] = useState('all'); // 'all' | 'rucapellan' | 'cecil'
