@@ -51,7 +51,9 @@ export default function PushNotificationButton() {
 
     (async () => {
       try {
-        const reg = await navigator.serviceWorker.ready;
+        // Usar register() en vez de .ready — register() resuelve de inmediato
+        // con el registro existente sin esperar que el SW controle la página.
+        const reg = await navigator.serviceWorker.register('/sw.js');
         regRef.current = reg;
         const sub = await reg.pushManager.getSubscription();
 
@@ -123,16 +125,12 @@ export default function PushNotificationButton() {
       setLoadStep('1/4 Permiso…');
       const permPromise = Notification.requestPermission();
 
-      // Paso 2: SW ready — con timeout de 10s para no colgar infinitamente
+      // Paso 2: obtener registro del SW — register() resuelve inmediatamente
+      // (idempotente: devuelve el registro existente si ya está registrado)
       setLoadStep('2/4 SW…');
       const swPromise = regRef.current
         ? Promise.resolve(regRef.current)
-        : Promise.race([
-            navigator.serviceWorker.ready,
-            new Promise((_, rej) =>
-              setTimeout(() => rej(new Error('Service Worker no respondió (timeout 10s)')), 10_000)
-            ),
-          ]);
+        : navigator.serviceWorker.register('/sw.js');
 
       const [permission, reg] = await Promise.all([permPromise, swPromise]);
       regRef.current = reg;
