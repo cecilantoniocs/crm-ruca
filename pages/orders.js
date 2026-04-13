@@ -163,8 +163,8 @@ export default function Orders() {
 
   // ---- filtros de fecha (misma barra/flujo que sales.js) ----
   const [quickRange, setQuickRange] = useState('today'); // 'today' | 'week' | 'month' | 'range'
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
+  const [fromDate, setFromDate] = useState(() => toYMDLocal(new Date()));
+  const [toDate, setToDate] = useState(() => toYMDLocal(new Date()));
 
   // 🔹 filtros: cartera y repartidor
   const [ownerFilter, setOwnerFilter] = useState('all'); // 'all' | 'rucapellan' | 'cecil'
@@ -296,45 +296,37 @@ export default function Orders() {
     return () => window.removeEventListener('click', close);
   }, []);
 
-  // ✅ Refetch resiliente
+  // ✅ Refetch resiliente — pasa fechas al API y paraleliza requests
   const refetch = useCallback(async () => {
     setLoading(true);
     setLoadError('');
 
+    const params = {};
+    if (fromDate) params.from = fromDate;
+    if (toDate)   params.to   = toDate;
+
     try {
-      const resO = await axiosClient.get('orders');
+      const seller = getCurrentSeller?.();
+      const [resO, resCour, resC] = await Promise.all([
+        axiosClient.get('orders', { params }),
+        axiosClient.get('couriers').catch(() => ({ data: [] })),
+        seller?.id
+          ? getClients(seller.id).catch(() => ({ data: [] }))
+          : Promise.resolve({ data: [] }),
+      ]);
       const list = resO?.data ?? [];
       list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
       setOrders(list);
+      setCouriers(resCour?.data ?? []);
+      setClients(resC?.data ?? []);
     } catch (e) {
       console.error('Error cargando pedidos:', e);
       setOrders([]);
       setLoadError('Error al cargar pedidos.');
+    } finally {
       setLoading(false);
-      return;
     }
-
-    try {
-      const resCour = await axiosClient.get('couriers');
-      setCouriers(resCour?.data ?? []);
-    } catch {
-      setCouriers([]);
-    }
-
-    try {
-      const seller = getCurrentSeller?.();
-      if (seller?.id) {
-        const resC = await getClients(seller.id);
-        setClients(resC?.data ?? []);
-      } else {
-        setClients([]);
-      }
-    } catch {
-      setClients([]);
-    }
-
-    setLoading(false);
-  }, []);
+  }, [fromDate, toDate]);
 
   // inicializar + refrescar
   useEffect(() => { refetch(); }, [refetch]);
