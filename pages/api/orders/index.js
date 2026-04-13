@@ -334,57 +334,55 @@ export default async function handler(req, res) {
 
       await logAudit(user, { action: 'order.created', entity: 'order', entityId: orderId, description: `Pedido creado — ${body.client_name || ''}` });
 
-      // Notificaciones push (fire-and-forget)
-      ;(async () => {
-        try {
-          // Nombre del repartidor asignado (solo para pedidos con delivery)
-          let courierName = '';
-          if (!isPickup && body.delivered_by) {
-            const { data: courier } = await supabaseServer
-              .from('users_app')
-              .select('name')
-              .eq('id', body.delivered_by)
-              .maybeSingle();
-            courierName = courier?.name || 'Repartidor';
-          }
-
-          // Resumen de ítems: "2x Producto A, 1x Producto B"
-          const items = Array.isArray(body.items) ? body.items : [];
-          const itemsSummary = items
-            .slice(0, 3)
-            .map(it => `${it.qty ?? 1}x ${it.name ?? ''}`)
-            .filter(Boolean)
-            .join(', ') + (items.length > 3 ? ` +${items.length - 3} más` : '');
-
-          // Fecha de entrega formateada DD/MM/YYYY
-          let fechaEntrega = '';
-          if (body.delivery_date) {
-            const [y, m, d] = body.delivery_date.split('-');
-            fechaEntrega = `${d}/${m}/${y}`;
-          }
-
-          const clientLine = `${body.client_name || 'Cliente'}${body.client_local ? ` — ${body.client_local}` : ''}`;
-          const destino    = isPickup ? 'Retiro en Bodega' : courierName;
-          const title      = `Nuevo pedido — ${destino}`;
-          const bodyText   = [
-            clientLine,
-            fechaEntrega ? `Entrega: ${fechaEntrega}` : '',
-            itemsSummary,
-          ].filter(Boolean).join('\n');
-
-          if (isPickup) {
-            sendPushToRoles(['admin', 'supervisor'], {
-              title, body: bodyText, data: { orderId, url: '/orders' },
-            }).catch(() => {});
-          } else if (body.delivered_by) {
-            sendPushToUser(body.delivered_by, {
-              title, body: bodyText, data: { orderId, url: '/orders' },
-            }).catch(() => {});
-          }
-        } catch (e) {
-          console.warn('[push] error armando notificación', e?.message);
+      // Notificaciones push — awaited para que Vercel no corte la función antes de enviar
+      try {
+        // Nombre del repartidor asignado (solo para pedidos con delivery)
+        let courierName = '';
+        if (!isPickup && body.delivered_by) {
+          const { data: courier } = await supabaseServer
+            .from('users_app')
+            .select('name')
+            .eq('id', body.delivered_by)
+            .maybeSingle();
+          courierName = courier?.name || 'Repartidor';
         }
-      })();
+
+        // Resumen de ítems: "2x Producto A, 1x Producto B"
+        const items = Array.isArray(body.items) ? body.items : [];
+        const itemsSummary = items
+          .slice(0, 3)
+          .map(it => `${it.qty ?? 1}x ${it.name ?? ''}`)
+          .filter(Boolean)
+          .join(', ') + (items.length > 3 ? ` +${items.length - 3} más` : '');
+
+        // Fecha de entrega formateada DD/MM/YYYY
+        let fechaEntrega = '';
+        if (body.delivery_date) {
+          const [y, m, d] = body.delivery_date.split('-');
+          fechaEntrega = `${d}/${m}/${y}`;
+        }
+
+        const clientLine = `${body.client_name || 'Cliente'}${body.client_local ? ` — ${body.client_local}` : ''}`;
+        const destino    = isPickup ? 'Retiro en Bodega' : courierName;
+        const title      = `Nuevo pedido — ${destino}`;
+        const bodyText   = [
+          clientLine,
+          fechaEntrega ? `Entrega: ${fechaEntrega}` : '',
+          itemsSummary,
+        ].filter(Boolean).join('\n');
+
+        if (isPickup) {
+          await sendPushToRoles(['admin', 'supervisor'], {
+            title, body: bodyText, data: { orderId, url: '/orders' },
+          });
+        } else if (body.delivered_by) {
+          await sendPushToUser(body.delivered_by, {
+            title, body: bodyText, data: { orderId, url: '/orders' },
+          });
+        }
+      } catch (e) {
+        console.warn('[push] error enviando notificación', e?.message);
+      }
 
       return res.status(201).json(dto);
     }
