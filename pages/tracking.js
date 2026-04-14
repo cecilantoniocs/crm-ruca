@@ -180,7 +180,7 @@ export default function TrackingPage() {
   const [basemap,         setBasemap]         = useState('streets');
   const [autoRefresh,     setAutoRefresh]     = useState(true);
   const [lastRefreshTime, setLastRefreshTime] = useState(null);
-  const [panelOpen,       setPanelOpen]       = useState(true);
+  const [panelOpen,       setPanelOpen]       = useState(false);
   const [now,             setNow]             = useState(() => new Date());
   const [matchedLines,    setMatchedLines]    = useState(new Map()); // courierId → [[lat,lng]]
   const [matchingRoutes,  setMatchingRoutes]  = useState(false);
@@ -416,6 +416,18 @@ export default function TrackingPage() {
     }, 150);
     return () => clearTimeout(t);
   }, [map, points]);
+
+  // ── ResizeObserver: detecta cambios reales de tamaño (robusto en iOS Safari) ──
+  useEffect(() => {
+    if (!map || typeof ResizeObserver === 'undefined') return;
+    const container = map.getContainer();
+    if (!container) return;
+    const ro = new ResizeObserver(() => {
+      try { map.invalidateSize(); } catch {}
+    });
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [map]);
 
   // ── Centrar mapa en un courier ────────────────────────────────────────────
   const focusCourier = (cid) => {
