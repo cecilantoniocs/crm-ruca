@@ -388,28 +388,34 @@ export default function TrackingPage() {
     return arrows;
   }, [groups, colorIndexByCourier]);
 
-  // ── Encuadre del mapa ─────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!map) return;
-    if (!points?.length) { map.setView([-29.90453, -71.24894], 11); return; }
-    if (points.length === 1) { map.setView([points[0].lat, points[0].lng], 14); return; }
-    const lats = points.map(p => p.lat);
-    const lngs = points.map(p => p.lng);
-    try {
-      map.fitBounds(
-        [[Math.min(...lats), Math.min(...lngs)], [Math.max(...lats), Math.max(...lngs)]],
-        { padding: [30, 30], maxZoom: 16 }
-      );
-    } catch {}
-  }, [map, points]);
-
-  // ── Reajustar Leaflet cuando el panel lateral aparece/desaparece ─────────
+  // ── Reajustar Leaflet (inmediato, sin delay) ──────────────────────────────
+  // Se llama cada vez que algo puede cambiar el tamaño del contenedor del mapa.
   const panelVisible = courierStats.size > 0;
   useEffect(() => {
     if (!map) return;
-    const t = setTimeout(() => { try { map.invalidateSize(); } catch {} }, 60);
+    try { map.invalidateSize(); } catch {}
+  }, [map, panelOpen, panelVisible, loading, matchingRoutes]);
+
+  // ── Encuadre del mapa (tras invalidar tamaño) ─────────────────────────────
+  useEffect(() => {
+    if (!map) return;
+    // Primero invalidar tamaño, luego encuadrar con pequeño delay para que el DOM se estabilice
+    try { map.invalidateSize(); } catch {}
+    const t = setTimeout(() => {
+      try { map.invalidateSize(); } catch {}
+      if (!points?.length) { map.setView([-29.90453, -71.24894], 11); return; }
+      if (points.length === 1) { map.setView([points[0].lat, points[0].lng], 14); return; }
+      const lats = points.map(p => p.lat);
+      const lngs = points.map(p => p.lng);
+      try {
+        map.fitBounds(
+          [[Math.min(...lats), Math.min(...lngs)], [Math.max(...lats), Math.max(...lngs)]],
+          { padding: [30, 30], maxZoom: 16 }
+        );
+      } catch {}
+    }, 150);
     return () => clearTimeout(t);
-  }, [map, panelOpen, panelVisible]);
+  }, [map, points]);
 
   // ── Centrar mapa en un courier ────────────────────────────────────────────
   const focusCourier = (cid) => {
@@ -678,15 +684,15 @@ export default function TrackingPage() {
             </MapContainer>
           </div>
 
-          {/* Panel lateral DERECHO */}
-          {courierStats.size > 0 && (
-            <>
+          {/* Panel lateral DERECHO — wrapper siempre en DOM para evitar layout shifts */}
+          <div className={`shrink-0 flex flex-col ${panelOpen ? 'w-64' : 'w-10'}`} style={panelOpen ? { height: '70vh' } : {}}>
+
             {/* Botón compacto cuando está cerrado */}
             {!panelOpen && (
               <button
                 onClick={() => setPanelOpen(true)}
                 title="Ver repartidores"
-                className="shrink-0 flex flex-col items-center gap-1.5 px-2 py-3 bg-brand-600 border border-brand-600 rounded-xl shadow-sm text-white hover:bg-brand-700 transition-colors"
+                className="h-full flex flex-col items-center justify-center gap-1.5 px-2 py-3 bg-brand-600 border border-brand-600 rounded-xl shadow-sm text-white hover:bg-brand-700 transition-colors"
               >
                 <ChevronRight size={16} />
                 <span className="text-[10px] font-medium [writing-mode:vertical-rl] rotate-180 tracking-wide">
@@ -697,8 +703,7 @@ export default function TrackingPage() {
 
             {/* Panel expandido */}
             {panelOpen && (
-            <div className="w-64 bg-white rounded-xl border border-gray-200 shadow-sm shrink-0 flex flex-col"
-              style={{ height: '70vh' }}>
+            <div className="w-full h-full bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col">
 
               {/* Cabecera con toggle */}
               <button
@@ -709,15 +714,23 @@ export default function TrackingPage() {
                 <ChevronRight size={16} className="rotate-180" />
               </button>
 
-              {panelOpen && (
-                <div className="overflow-y-auto flex-1 divide-y divide-gray-100">
-                  {[...courierStats.entries()]
+              <div className="overflow-y-auto flex-1 divide-y divide-gray-100">
+                {(() => {
+                  const list = [...courierStats.entries()]
+                    .filter(([cid]) => couriers.some(c => c.id === cid))
                     .sort(([, a], [, b]) => {
                       const ta = a.lastTs ? a.lastTs.getTime() : 0;
                       const tb = b.lastTs ? b.lastTs.getTime() : 0;
-                      return tb - ta; // más reciente arriba
-                    })
-                    .map(([cid, stat]) => {
+                      return tb - ta;
+                    });
+                  if (list.length === 0) {
+                    return (
+                      <div className="flex items-center justify-center h-full text-xs text-gray-400">
+                        {loading ? 'Cargando…' : 'Sin datos para esta fecha'}
+                      </div>
+                    );
+                  }
+                  return list.map(([cid, stat]) => {
                     const color = `#${PALETTE[colorIndexByCourier.get(cid) ?? 0]}`;
                     return (
                       <div key={cid} className="p-3 space-y-2.5">
@@ -787,13 +800,12 @@ export default function TrackingPage() {
                         <div className="h-0.5 rounded-full" style={{ backgroundColor: color, opacity: 0.4 }} />
                       </div>
                     );
-                  })}
-                </div>
-              )}
+                  });
+                })()}
+              </div>
             </div>
             )}
-            </>
-          )}
+          </div>
         </div>
       </div>
 
