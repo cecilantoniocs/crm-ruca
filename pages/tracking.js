@@ -711,7 +711,13 @@ export default function TrackingPage() {
 
               {panelOpen && (
                 <div className="overflow-y-auto flex-1 divide-y divide-gray-100">
-                  {[...courierStats.entries()].map(([cid, stat]) => {
+                  {[...courierStats.entries()]
+                    .sort(([, a], [, b]) => {
+                      const ta = a.lastTs ? new Date(toUTC(a.lastTs)).getTime() : 0;
+                      const tb = b.lastTs ? new Date(toUTC(b.lastTs)).getTime() : 0;
+                      return tb - ta; // más reciente arriba
+                    })
+                    .map(([cid, stat]) => {
                     const color = `#${PALETTE[colorIndexByCourier.get(cid) ?? 0]}`;
                     return (
                       <div key={cid} className="p-3 space-y-2.5">
