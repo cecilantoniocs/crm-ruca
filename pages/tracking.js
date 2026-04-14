@@ -478,25 +478,28 @@ export default function TrackingPage() {
               </select>
             </div>
 
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">Fecha</label>
-              <DateInput
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="border border-gray-300 rounded-lg px-2 py-2 text-sm bg-white min-w-[138px]"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">Desde</label>
-              <input type="time" value={from} onChange={(e) => setFrom(e.target.value)}
-                className="border border-gray-300 rounded-lg px-2 py-2 text-sm bg-white" />
-            </div>
-
-            <div>
-              <label className="block text-sm text-gray-600 mb-1">Hasta</label>
-              <input type="time" value={to} onChange={(e) => setTo(e.target.value)}
-                className="border border-gray-300 rounded-lg px-2 py-2 text-sm bg-white" />
+            {/* Fecha + horas: en móvil columna (horas juntas abajo), en desktop fila */}
+            <div className="flex flex-col sm:flex-row sm:items-end gap-2 sm:gap-3">
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Fecha</label>
+                <DateInput
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  className="border border-gray-300 rounded-lg px-2 py-2 text-sm bg-white min-w-[138px]"
+                />
+              </div>
+              <div className="flex gap-2">
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">Desde</label>
+                  <input type="time" value={from} onChange={(e) => setFrom(e.target.value)}
+                    className="border border-gray-300 rounded-lg px-2 py-2 text-sm bg-white" />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">Hasta</label>
+                  <input type="time" value={to} onChange={(e) => setTo(e.target.value)}
+                    className="border border-gray-300 rounded-lg px-2 py-2 text-sm bg-white" />
+                </div>
+              </div>
             </div>
 
             <button
