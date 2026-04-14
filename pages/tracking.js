@@ -713,8 +713,8 @@ export default function TrackingPage() {
                 <div className="overflow-y-auto flex-1 divide-y divide-gray-100">
                   {[...courierStats.entries()]
                     .sort(([, a], [, b]) => {
-                      const ta = a.lastTs ? new Date(toUTC(a.lastTs)).getTime() : 0;
-                      const tb = b.lastTs ? new Date(toUTC(b.lastTs)).getTime() : 0;
+                      const ta = a.lastTs ? a.lastTs.getTime() : 0;
+                      const tb = b.lastTs ? b.lastTs.getTime() : 0;
                       return tb - ta; // más reciente arriba
                     })
                     .map(([cid, stat]) => {
