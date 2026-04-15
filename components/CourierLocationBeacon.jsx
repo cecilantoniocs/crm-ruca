@@ -170,16 +170,32 @@ function BeaconInner() {
     return () => stopWatch();
   }, []); // eslint-disable-line
 
-  // Reactivar tracking cuando el repartidor vuelve a la pestaña (y el watch fue detenido)
+  // Reactivar tracking cuando el repartidor vuelve a la pestaña.
+  // Forzamos stopWatch + startWatch para reiniciar watchPosition aunque ya tenga un ID
+  // (en Android, Doze mode puede dejar el watch "zombi": registrado pero sin updates).
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === 'visible' && permState === 'granted') {
+        stopWatch();
         startWatch();
       }
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [permState, startWatch]);
+  }, [permState, startWatch, stopWatch]);
+
+  // Watchdog: si llevan >3 min sin ping y el permiso está concedido, reiniciar watchPosition.
+  // Cubre casos donde Android suspende el GPS sin disparar visibilitychange.
+  useEffect(() => {
+    if (permState !== 'granted') return;
+    const id = setInterval(() => {
+      if (Date.now() - lastPingRef.current > 3 * 60_000) {
+        stopWatch();
+        startWatch();
+      }
+    }, 2 * 60_000);
+    return () => clearInterval(id);
+  }, [permState, startWatch, stopWatch]);
 
   // ── UI ──────────────────────────────────────────────────────────────────────
 

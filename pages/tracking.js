@@ -836,7 +836,7 @@ export default function TrackingPage() {
           filter: drop-shadow(0 2px 3px rgba(0,0,0,0.35));
         }
         .leaflet-marker-icon.truck-gray {
-          filter: grayscale(100%) opacity(0.5);
+          filter: grayscale(100%) opacity(0.75);
         }
         @keyframes spin-slow {
           from { transform: rotate(0deg); }
