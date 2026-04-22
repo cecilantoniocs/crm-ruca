@@ -1,7 +1,7 @@
 // pages/_app.js
 import '../styles/globals.css';
 import { useRouter } from 'next/router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import axiosClient from '../config/axios';
 import 'leaflet/dist/leaflet.css';
 
@@ -55,7 +55,26 @@ function AuthGuard({ children }) {
   return children;
 }
 
+function UpdateBanner({ onUpdate }) {
+  return (
+    <div className="fixed top-0 left-0 right-0 z-[99999] flex items-center justify-between gap-3 bg-brand-600 text-white px-4 py-3 shadow-lg">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <span className="text-lg">🚀</span>
+        <span>Nueva versión disponible</span>
+      </div>
+      <button
+        onClick={onUpdate}
+        className="shrink-0 rounded-lg bg-white text-brand-600 font-semibold text-sm px-4 py-1.5 hover:bg-brand-50 active:scale-95 transition-transform"
+      >
+        Actualizar
+      </button>
+    </div>
+  );
+}
+
 export default function App({ Component, pageProps }) {
+  const [showUpdateBanner, setShowUpdateBanner] = useState(false);
+  const waitingSwRef = useRef(null);
   // Ping de actividad (last_seen_at) cada 60s cuando la pestaña está visible
   useEffect(() => {
     let timer;
@@ -113,13 +132,8 @@ export default function App({ Component, pageProps }) {
 
     const promptUserToRefresh = (registration) => {
       if (!registration || !registration.waiting) return;
-
-      // POPUP simple. Si tienes un hook/UX propio, reemplaza este confirm por tu UI.
-      const accept = window.confirm('Hay una nueva versión de la app. ¿Actualizar ahora?');
-      if (accept) {
-        // Pedimos al SW nuevo que se active inmediatamente
-        registration.waiting.postMessage({ type: 'SKIP_WAITING' });
-      }
+      waitingSwRef.current = registration.waiting;
+      setShowUpdateBanner(true);
     };
 
     const onMessageFromSW = async (event) => {
@@ -170,9 +184,17 @@ export default function App({ Component, pageProps }) {
     };
   }, []);
 
+  const handleUpdate = () => {
+    waitingSwRef.current?.postMessage({ type: 'SKIP_WAITING' });
+    setShowUpdateBanner(false);
+  };
+
   return (
-    <AuthGuard>
-      <Component {...pageProps} />
-    </AuthGuard>
+    <>
+      {showUpdateBanner && <UpdateBanner onUpdate={handleUpdate} />}
+      <AuthGuard>
+        <Component {...pageProps} />
+      </AuthGuard>
+    </>
   );
 }
