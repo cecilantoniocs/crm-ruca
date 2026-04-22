@@ -6,8 +6,7 @@ import { sendPushToUser, sendPushToRoles } from '@/lib/webpush';
 import { z } from 'zod';
 
 // ---------- Utils ----------
-function startOfDayISO(d) { const x = new Date(d); x.setHours(0,0,0,0); return x.toISOString(); }
-function nextDayISO(d)    { const x = new Date(d); x.setHours(0,0,0,0); x.setDate(x.getDate()+1); return x.toISOString(); }
+
 const STATUSES = ['pendiente','entregado'];
 
 // ---------- Payment method (normalización y whitelist) ----------
@@ -158,7 +157,9 @@ export default async function handler(req, res) {
       `;
 
       const buildQuery = (cols) => {
-        let qy = supabaseServer.from('orders').select(cols).order('created_at', { ascending: false });
+        let qy = supabaseServer.from('orders').select(cols)
+          .order('delivery_date', { ascending: false, nullsFirst: false })
+          .order('created_at',    { ascending: false });
         if (q) {
           const s = `%${q}%`;
           qy = qy.or(`client_name.ilike.${s},client_local.ilike.${s}`);
@@ -166,8 +167,8 @@ export default async function handler(req, res) {
         if (status) qy = qy.eq('status', status);
         if (sellerId) qy = qy.eq('seller_id', sellerId);
         if (courierId) qy = qy.eq('delivered_by', courierId);
-        if (from) qy = qy.gte('created_at', startOfDayISO(from));
-        if (to)   qy = qy.lt('created_at', nextDayISO(to));
+        if (from) qy = qy.gte('delivery_date', from);
+        if (to)   qy = qy.lte('delivery_date', to);
         if (allowedClientIds) qy = qy.in('client_id', allowedClientIds);
         return qy;
       };
