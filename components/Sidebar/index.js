@@ -338,7 +338,7 @@ const Sidebar = ({ menuOpen = false, setMenuOpen }) => {
               RookApp v6.0
             </div>
             <div className="text-[9px] uppercase tracking-wide opacity-80 mb-0.5">
-              Last Update 11-04-26
+              Last Update 22-04-26
             </div>
             <div>
               Developed by <span className="font-semibold">Cecil</span> ⚡
